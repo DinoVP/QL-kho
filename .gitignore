@@ -1,0 +1,17 @@
+# =========================
+# FRONTEND (VUE.JS)
+# =========================
+FE/node_modules/
+FE/dist/
+.env
+.env.*
+
+# =========================
+# BACKEND (C# ASP.NET)
+# =========================
+BE/bin/
+BE/obj/
+.vs/
+*.user
+*.suo
+appsettings.Development.json
