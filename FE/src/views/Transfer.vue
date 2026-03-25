@@ -1,55 +1,208 @@
 <script setup>
-import { ref } from 'vue'
-import { MagnifyingGlassIcon, PlusIcon, TruckIcon } from '@heroicons/vue/24/outline'
+import { ref, computed } from 'vue'
+import { 
+  MagnifyingGlassIcon, PlusIcon, EyeIcon, 
+  XMarkIcon, ArrowsRightLeftIcon, TrashIcon,
+  PrinterIcon
+} from '@heroicons/vue/24/outline'
 
-const transfers = ref([]) 
+// === 1. STATE CHÍNH: DỮ LIỆU MẪU ĐIỀU CHUYỂN ===
+const transferReceipts = ref([
+  {
+    id: 1, code: 'PDC0001', date: '2026-03-24',
+    fromWarehouseId: 'KHO-HN', fromWarehouseName: 'Tổng kho Miền Bắc (Hà Nội)',
+    toWarehouseId: 'KHO-DN', toWarehouseName: 'Trung tâm Phân phối Đà Nẵng',
+    totalQty: 150,
+    status: 'completed', // Đã nhận hàng
+    note: 'Điều chuyển hàng bổ sung cho miền Trung',
+    items: [
+      { sku: 'SKU-002', name: 'Bột giặt OMO 3.6kg', unit: 'Túi', qty: 100 },
+      { sku: 'SKU-004', name: 'Bàn phím cơ Keychron K8', unit: 'Cái', qty: 50 }
+    ]
+  },
+  {
+    id: 2, code: 'PDC0002', date: '2026-03-26',
+    fromWarehouseId: 'KHO-HCM', fromWarehouseName: 'Chi nhánh Miền Nam (TP.HCM)',
+    toWarehouseId: 'KHO-CT', toWarehouseName: 'Trạm trung chuyển Cần Thơ',
+    totalQty: 20,
+    status: 'transferring', // Đang luân chuyển
+    note: 'Chuyển gấp bằng xe tải biển số 51C-12345',
+    items: [
+      { sku: 'SKU-001', name: 'Laptop Dell XPS 15', unit: 'Cái', qty: 20 }
+    ]
+  }
+])
+
+// === 2. MOCK DATA BỔ TRỢ ===
+const mockWarehouses = ref([
+  { id: 'KHO-HN', name: 'Tổng kho Miền Bắc (Hà Nội)' },
+  { id: 'KHO-DN', name: 'Trung tâm Phân phối Đà Nẵng' },
+  { id: 'KHO-HCM', name: 'Chi nhánh Miền Nam (TP.HCM)' },
+  { id: 'KHO-CT', name: 'Trạm trung chuyển Cần Thơ' }
+])
+
+const mockProducts = ref([
+  { sku: 'SKU-001', name: 'Laptop Dell XPS 15', unit: 'Cái' },
+  { sku: 'SKU-002', name: 'Bột giặt OMO 3.6kg', unit: 'Túi' },
+  { sku: 'SKU-003', name: 'Màn hình LG 27"', unit: 'Cái' },
+  { sku: 'SKU-004', name: 'Bàn phím cơ Keychron K8', unit: 'Cái' }
+])
+
+// === 3. BỘ LỌC TÌM KIẾM ===
+const searchQuery = ref('')
+const filterStatus = ref('')
+
+const filteredReceipts = computed(() => {
+  return transferReceipts.value.filter(r => {
+    const matchSearch = r.code.toLowerCase().includes(searchQuery.value.toLowerCase()) || 
+                        r.fromWarehouseName.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
+                        r.toWarehouseName.toLowerCase().includes(searchQuery.value.toLowerCase())
+    const matchStatus = filterStatus.value === '' || r.status === filterStatus.value
+    return matchSearch && matchStatus
+  }).sort((a, b) => b.id - a.id)
+})
+
+// === 4. LOGIC MODAL TẠO / XEM PHIẾU ===
+const showModal = ref(false)
+const modalMode = ref('add') 
+
+const formData = ref({ 
+  id: null, code: '', date: '', fromWarehouseId: '', toWarehouseId: '', 
+  items: [], note: '', status: 'pending' 
+})
+
+const generateReceiptCode = () => `PDC${(transferReceipts.value.length + 1).toString().padStart(4, '0')}`
+const getToday = () => new Date().toISOString().split('T')[0]
+
+const openModal = (mode, receipt = null) => {
+  modalMode.value = mode
+  if (receipt) {
+    formData.value = JSON.parse(JSON.stringify(receipt)) 
+  } else {
+    formData.value = { id: null, code: '', date: getToday(), fromWarehouseId: '', toWarehouseId: '', items: [], note: '', status: 'pending' }
+  }
+  showModal.value = true
+}
+
+const closeModal = () => showModal.value = false
+
+const getStatusBadge = (status) => {
+  switch(status) {
+    case 'pending': return { text: 'Chờ xuất kho', class: 'bg-amber-100 text-amber-700 border-amber-200' }
+    case 'transferring': return { text: 'Đang luân chuyển', class: 'bg-blue-100 text-blue-700 border-blue-200' }
+    case 'completed': return { text: 'Đã nhận đủ', class: 'bg-emerald-100 text-emerald-700 border-emerald-200' }
+    default: return { text: 'Khác', class: 'bg-gray-100 text-gray-500' }
+  }
+}
+
+// Lắng nghe sự kiện để tránh chọn trùng kho
+const handleFromWarehouseChange = () => {
+  if (formData.value.fromWarehouseId === formData.value.toWarehouseId) {
+    formData.value.toWarehouseId = '' // Reset kho đến nếu bị trùng
+  }
+}
+
+// === 5. LOGIC CHỌN HÀNG ĐIỀU CHUYỂN ===
+const selectedSkuToAdd = ref('')
+
+const handleAddItem = () => {
+  if (!selectedSkuToAdd.value) return
+  const existingItem = formData.value.items.find(i => i.sku === selectedSkuToAdd.value)
+  if (existingItem) existingItem.qty += 1
+  else {
+    const prod = mockProducts.value.find(p => p.sku === selectedSkuToAdd.value)
+    if (prod) formData.value.items.push({ sku: prod.sku, name: prod.name, unit: prod.unit, qty: 1 })
+  }
+  selectedSkuToAdd.value = '' 
+}
+
+const removeItem = (index) => formData.value.items.splice(index, 1)
+
+// === 6. LOGIC TÍNH TOÁN & LƯU & IN ẤN ===
+const totalQty = computed(() => formData.value.items.reduce((sum, item) => sum + item.qty, 0))
+
+const handleSubmit = () => {
+  if (!formData.value.fromWarehouseId || !formData.value.toWarehouseId) return alert('Vui lòng chọn đầy đủ Kho xuất và Kho nhập!')
+  if (formData.value.items.length === 0) return alert('Sếp chưa chọn mặt hàng nào để điều chuyển!')
+  
+  if (modalMode.value === 'add') {
+    transferReceipts.value.push({
+      ...formData.value, id: Date.now(), code: generateReceiptCode(),
+      totalQty: totalQty.value,
+      fromWarehouseName: mockWarehouses.value.find(w => w.id === formData.value.fromWarehouseId)?.name,
+      toWarehouseName: mockWarehouses.value.find(w => w.id === formData.value.toWarehouseId)?.name
+    })
+    alert('Tạo Phiếu Điều Chuyển thành công!')
+  }
+  closeModal()
+}
+
+const handlePrintReceipt = () => alert(`Đang xuất lệnh máy in: IN PHIẾU ĐIỀU CHUYỂN NỘI BỘ mã [${formData.value.code}]...`)
 </script>
 
 <template>
-  <div class="space-y-5 md:space-y-6 animate-fade-in pb-10 px-0 md:px-1">
+  <div class="space-y-5 md:space-y-6 animate-fade-in pb-10 px-0 md:px-1 relative">
     
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
       <div>
-        <h2 class="text-xl md:text-2xl font-bold text-gray-800">Điều chuyển Nội bộ</h2>
-        <p class="text-xs md:text-sm text-gray-500 mt-1">Quản lý luân chuyển hàng hóa giữa các chi nhánh, kho hàng</p>
+        <h2 class="text-xl md:text-2xl font-bold text-gray-800">Điều chuyển Nội bộ (Transfer)</h2>
+        <p class="text-xs md:text-sm text-gray-500 mt-1">Lập chứng từ luân chuyển hàng hóa giữa các kho và chi nhánh</p>
       </div>
-      <button class="bg-primary-600 hover:bg-primary-700 text-white px-4 py-2.5 rounded-lg flex items-center gap-2 text-sm font-semibold shadow-sm transition-colors active:scale-95 justify-center">
-        <PlusIcon class="w-5 h-5" /> Lệnh Điều Chuyển
+      <button @click="openModal('add')" class="bg-primary-600 hover:bg-primary-700 text-white px-4 py-2.5 rounded-lg flex items-center gap-2 text-sm font-semibold transition-colors shadow-sm">
+        <PlusIcon class="w-5 h-5" /> Lập Phiếu Điều Chuyển
       </button>
     </div>
 
     <div class="bg-white p-3 md:p-4 rounded-xl border border-gray-200 flex flex-col sm:flex-row items-center gap-3 md:gap-4 shadow-sm">
-      <div class="relative w-full sm:flex-1 max-w-none sm:max-w-md">
-        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-          <MagnifyingGlassIcon class="w-5 h-5 text-gray-400" />
-        </div>
-        <input type="text" class="block w-full pl-10 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-1 focus:ring-primary-500 outline-none" placeholder="Tìm mã lệnh, kho nguồn, kho đích...">
+      <div class="relative w-full sm:flex-1">
+        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><MagnifyingGlassIcon class="w-5 h-5 text-gray-400" /></div>
+        <input v-model="searchQuery" type="text" class="block w-full pl-10 pr-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-1 focus:ring-primary-500" placeholder="Tìm theo mã phiếu, tên kho xuất/nhập...">
       </div>
+      <select v-model="filterStatus" class="w-full sm:w-auto border border-gray-200 rounded-lg text-sm px-4 py-2 outline-none focus:ring-1 focus:ring-primary-500 cursor-pointer">
+        <option value="">Tất cả Trạng thái</option>
+        <option value="pending">Chờ xuất kho</option>
+        <option value="transferring">Đang luân chuyển</option>
+        <option value="completed">Đã nhận đủ</option>
+      </select>
     </div>
 
     <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
       <div class="w-full overflow-x-auto custom-scrollbar">
-        <table class="min-w-[900px] w-full divide-y divide-gray-200">
+        <table class="min-w-[1000px] w-full divide-y divide-gray-200">
           <thead class="bg-gray-50">
             <tr>
-              <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase">Mã Lệnh</th>
-              <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase">Thời gian</th>
-              <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase">Kho xuất (Nguồn)</th>
-              <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase">Kho nhập (Đích)</th>
-              <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase">Trạng thái</th>
-              <th class="px-5 py-3.5 text-right text-xs font-bold text-gray-500 uppercase">Thao tác</th>
+              <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Mã Phiếu</th>
+              <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Ngày lập</th>
+              <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Từ Kho (Xuất)</th>
+              <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Đến Kho (Nhập)</th>
+              <th class="px-5 py-3.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Tổng SL</th>
+              <th class="px-5 py-3.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Trạng thái</th>
+              <th class="px-5 py-3.5 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">Thao tác</th>
             </tr>
           </thead>
-          <tbody>
-            <tr>
-              <td colspan="6" class="px-6 py-16 md:py-24 text-center">
-                <div class="flex flex-col items-center justify-center">
-                  <div class="bg-gray-50 p-4 rounded-full mb-4 shadow-inner">
-                    <TruckIcon class="w-10 h-10 md:w-12 md:h-12 text-indigo-500" />
-                  </div>
-                  <h3 class="text-sm md:text-base font-semibold text-gray-900">Không có lệnh điều chuyển</h3>
-                  <p class="text-xs md:text-sm text-gray-500 mt-2 max-w-sm mx-auto">Chưa có hoạt động luân chuyển hàng hóa nội bộ nào diễn ra.</p>
-                </div>
+          <tbody class="divide-y divide-gray-100 bg-white">
+            <tr v-if="filteredReceipts.length === 0">
+              <td colspan="7" class="px-6 py-16 text-center">
+                <ArrowsRightLeftIcon class="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                <h3 class="text-base font-semibold text-gray-700">Chưa có Phiếu Điều chuyển nào</h3>
+              </td>
+            </tr>
+
+            <tr v-for="receipt in filteredReceipts" :key="receipt.id" class="hover:bg-gray-50 transition-colors">
+              <td class="px-5 py-3 text-sm font-bold text-primary-700">{{ receipt.code }}</td>
+              <td class="px-5 py-3 text-sm font-medium text-gray-600">{{ receipt.date }}</td>
+              <td class="px-5 py-3 text-sm font-bold text-orange-700">{{ receipt.fromWarehouseName }}</td>
+              <td class="px-5 py-3 text-sm font-bold text-emerald-700">{{ receipt.toWarehouseName }}</td>
+              <td class="px-5 py-3 text-sm text-center font-bold text-gray-900">{{ receipt.totalQty }}</td>
+              <td class="px-5 py-3 text-center">
+                <span :class="['text-[10px] font-bold px-2 py-1 rounded border uppercase tracking-wider', getStatusBadge(receipt.status).class]">
+                  {{ getStatusBadge(receipt.status).text }}
+                </span>
+              </td>
+              <td class="px-5 py-3 text-right">
+                <button @click="openModal('view', receipt)" class="px-3 py-1.5 text-blue-600 hover:bg-blue-50 rounded bg-blue-50 border border-blue-100 font-medium text-xs flex items-center gap-1 ml-auto transition-colors">
+                  <EyeIcon class="w-4 h-4" /> Chi tiết
+                </button>
               </td>
             </tr>
           </tbody>
@@ -57,12 +210,157 @@ const transfers = ref([])
       </div>
     </div>
 
+    <Teleport to="body">
+      <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center px-4 bg-slate-900/50 backdrop-blur-sm animate-fade-in">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[90vh]">
+          
+          <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50 shrink-0">
+            <h3 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+              <ArrowsRightLeftIcon class="w-6 h-6 text-primary-600"/> 
+              {{ modalMode === 'add' ? 'Lập Phiếu Điều Chuyển Mới' : `Chi tiết Phiếu: ${formData.code}` }}
+            </h3>
+            <button @click="closeModal" class="text-gray-400 hover:text-red-500"><XMarkIcon class="w-6 h-6" /></button>
+          </div>
+
+          <div class="p-6 overflow-y-auto flex-1 custom-scrollbar">
+            <form id="transferForm" @submit.prevent="handleSubmit" class="space-y-6">
+              
+              <div class="bg-slate-50 p-4 rounded-lg border border-slate-200">
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4 border-b border-slate-200 pb-4">
+                  <div>
+                    <label class="block text-xs font-bold text-gray-700 mb-1">Mã Phiếu</label>
+                    <input v-model="formData.code" type="text" disabled class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-100 italic" placeholder="Tự động sinh">
+                  </div>
+                  <div>
+                    <label class="block text-xs font-bold text-gray-700 mb-1">Ngày luân chuyển <span class="text-red-500">*</span></label>
+                    <input v-model="formData.date" :disabled="modalMode === 'view'" type="date" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-primary-500 disabled:bg-gray-100 disabled:text-gray-500">
+                  </div>
+                  <div>
+                    <label class="block text-xs font-bold text-gray-700 mb-1">Trạng thái</label>
+                    <select v-model="formData.status" :disabled="modalMode === 'view'" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-primary-500 font-semibold disabled:bg-gray-100 disabled:text-gray-600" :class="getStatusBadge(formData.status).class">
+                      <option value="pending">Chờ xuất kho</option>
+                      <option value="transferring">Đang luân chuyển</option>
+                      <option value="completed">Đã nhận đủ (Chốt)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                  <div class="bg-orange-50 p-3 rounded border border-orange-100">
+                    <label class="block text-xs font-bold text-orange-800 mb-1">TỪ KHO (Kho xuất) <span class="text-red-500">*</span></label>
+                    <select v-model="formData.fromWarehouseId" @change="handleFromWarehouseChange" :disabled="modalMode === 'view'" required class="w-full border border-orange-200 rounded-lg px-3 py-2 text-sm focus:ring-orange-500 bg-white disabled:bg-gray-100 disabled:text-gray-600 cursor-pointer">
+                      <option value="" disabled>-- Chọn Kho Xuất --</option>
+                      <option v-for="wh in mockWarehouses" :key="wh.id" :value="wh.id">
+                        {{ wh.name }}
+                      </option>
+                    </select>
+                  </div>
+                  
+                  <div class="bg-emerald-50 p-3 rounded border border-emerald-100">
+                    <label class="block text-xs font-bold text-emerald-800 mb-1">ĐẾN KHO (Kho nhập) <span class="text-red-500">*</span></label>
+                    <select v-model="formData.toWarehouseId" :disabled="modalMode === 'view'" required class="w-full border border-emerald-200 rounded-lg px-3 py-2 text-sm focus:ring-emerald-500 bg-white disabled:bg-gray-100 disabled:text-gray-600 cursor-pointer">
+                      <option value="" disabled>-- Chọn Kho Nhập --</option>
+                      <option v-for="wh in mockWarehouses" :key="wh.id" :value="wh.id" :disabled="wh.id === formData.fromWarehouseId" :class="wh.id === formData.fromWarehouseId ? 'bg-gray-100 text-gray-400' : ''">
+                        {{ wh.name }} {{ wh.id === formData.fromWarehouseId ? '(Đang là kho xuất)' : '' }}
+                      </option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <div class="flex items-center justify-between mb-2">
+                  <h4 class="text-sm font-bold text-slate-800">Danh sách Hàng hóa Điều chuyển</h4>
+                </div>
+
+                <div v-if="modalMode === 'add'" class="flex flex-col sm:flex-row gap-2 mb-3 bg-blue-50 p-3 rounded-lg border border-blue-100">
+                  <select v-model="selectedSkuToAdd" class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-primary-500 cursor-pointer">
+                    <option value="" disabled>-- Chọn Sản phẩm cần luân chuyển --</option>
+                    <option v-for="prod in mockProducts" :key="prod.sku" :value="prod.sku">
+                      {{ prod.sku }} - {{ prod.name }}
+                    </option>
+                  </select>
+                  <button type="button" @click="handleAddItem" :disabled="!selectedSkuToAdd" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-50 transition-colors whitespace-nowrap">
+                    Thêm vào Lưới
+                  </button>
+                </div>
+
+                <div class="border border-gray-200 rounded-lg overflow-x-auto">
+                  <table class="w-full text-sm text-left">
+                    <thead class="bg-gray-50 text-xs uppercase font-bold text-gray-500">
+                      <tr>
+                        <th class="px-4 py-3">Mã SKU</th>
+                        <th class="px-4 py-3">Tên Hàng</th>
+                        <th class="px-4 py-3 text-center">ĐVT</th>
+                        <th class="px-4 py-3 text-center w-32">Số lượng Chuyển</th>
+                        <th v-if="modalMode === 'add'" class="px-4 py-3 text-center w-10">#</th>
+                      </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-100">
+                      <tr v-if="formData.items.length === 0">
+                        <td :colspan="modalMode === 'add' ? 5 : 4" class="px-4 py-8 text-center text-gray-400 italic">
+                          Chưa có mặt hàng nào cần điều chuyển.
+                        </td>
+                      </tr>
+                      <tr v-for="(item, idx) in formData.items" :key="idx" class="hover:bg-gray-50">
+                        <td class="px-4 py-2 font-bold text-gray-700">{{ item.sku }}</td>
+                        <td class="px-4 py-2 font-medium">{{ item.name }}</td>
+                        <td class="px-4 py-2 text-center text-gray-500">{{ item.unit }}</td>
+                        <td class="px-4 py-2 text-center">
+                          <input v-if="modalMode === 'add'" v-model.number="item.qty" type="number" min="1" class="w-full text-center border border-gray-300 rounded px-2 py-1 font-bold text-blue-700 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                          <span v-else class="font-bold text-blue-700">{{ item.qty }}</span>
+                        </td>
+                        <td v-if="modalMode === 'add'" class="px-4 py-2 text-center">
+                          <button type="button" @click="removeItem(idx)" class="text-red-400 hover:text-red-600"><TrashIcon class="w-5 h-5 mx-auto"/></button>
+                        </td>
+                      </tr>
+                    </tbody>
+                    <tfoot class="bg-gray-50 font-bold border-t border-gray-200">
+                      <tr>
+                        <td colspan="3" class="px-4 py-3 text-right uppercase text-gray-600">Tổng Số Lượng:</td>
+                        <td class="px-4 py-3 text-center text-blue-700 text-base">{{ totalQty }}</td>
+                        <td v-if="modalMode === 'add'"></td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+
+              <div>
+                <label class="block text-xs font-bold text-gray-700 mb-1">Ghi chú / Thông tin xe tải</label>
+                <textarea v-model="formData.note" :disabled="modalMode === 'view'" rows="2" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-primary-500 disabled:bg-gray-100 disabled:text-gray-500" placeholder="VD: Giao bằng xe tải biển số 51C..."></textarea>
+              </div>
+
+            </form>
+          </div>
+
+          <div class="px-6 py-4 border-t border-gray-100 flex flex-col sm:flex-row justify-between items-center gap-3 bg-white shrink-0">
+            <div class="flex gap-2 w-full sm:w-auto">
+              <button v-if="modalMode === 'view'" @click="handlePrintReceipt" class="flex-1 sm:flex-none px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm font-bold transition-colors flex items-center justify-center gap-2 border border-slate-200 shadow-sm">
+                <PrinterIcon class="w-5 h-5"/> In Phiếu Điều Chuyển
+              </button>
+            </div>
+
+            <div class="flex gap-2 w-full sm:w-auto">
+              <button type="button" @click="closeModal" class="flex-1 sm:flex-none px-5 py-2.5 border border-gray-300 text-gray-700 rounded-lg text-sm font-semibold hover:bg-gray-50 transition-colors text-center">
+                {{ modalMode === 'view' ? 'Đóng lại' : 'Hủy bỏ' }}
+              </button>
+              <button v-if="modalMode === 'add'" type="submit" form="transferForm" class="flex-1 sm:flex-none px-5 py-2.5 bg-primary-600 text-white rounded-lg text-sm font-bold hover:bg-primary-700 shadow-md transition-colors flex items-center justify-center gap-2">
+                <ArrowsRightLeftIcon class="w-5 h-5"/> Hoàn tất Phiếu
+              </button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </Teleport>
+
   </div>
 </template>
 
 <style scoped>
-.custom-scrollbar::-webkit-scrollbar { height: 6px; }
+.custom-scrollbar::-webkit-scrollbar { height: 6px; width: 6px; }
 .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-.custom-scrollbar::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
-.custom-scrollbar:hover::-webkit-scrollbar-thumb { background: #cbd5e1; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+.custom-scrollbar:hover::-webkit-scrollbar-thumb { background: #94a3b8; }
 </style>
