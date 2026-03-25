@@ -1,73 +1,120 @@
 <script setup>
-import { ref } from 'vue'
-import { MagnifyingGlassIcon, BellAlertIcon, ArrowDownTrayIcon } from '@heroicons/vue/24/outline'
+import { ref, computed } from 'vue'
+import { 
+  BellAlertIcon, ExclamationTriangleIcon, 
+  XCircleIcon, CheckCircleIcon,
+  ShieldExclamationIcon, ClockIcon, ArrowUturnRightIcon
+} from '@heroicons/vue/24/outline'
 
-const alerts = ref([]) 
+// === 1. STATE CHÍNH: TRỐNG CHỜ API ===
+const alerts = ref([])
+
+// === 2. BỘ LỌC ===
+const filterSeverity = ref('')
+
+const activeAlerts = computed(() => {
+  return alerts.value.filter(a => {
+    const isNotResolved = a.status === 'active'
+    const matchSeverity = filterSeverity.value === '' || a.severity === filterSeverity.value
+    return isNotResolved && matchSeverity
+  })
+})
+
+const resolvedCount = computed(() => alerts.value.filter(a => a.status === 'resolved').length)
+
+// === 3. HÀM RENDER GIAO DIỆN ===
+const getAlertStyle = (severity) => {
+  switch(severity) {
+    case 'high': return { bg: 'bg-red-50 border-red-200', icon: XCircleIcon, iconColor: 'text-red-600', badge: 'bg-red-100 text-red-700' }
+    case 'medium': return { bg: 'bg-amber-50 border-amber-200', icon: ExclamationTriangleIcon, iconColor: 'text-amber-600', badge: 'bg-amber-100 text-amber-700' }
+    case 'low': return { bg: 'bg-blue-50 border-blue-200', icon: ShieldExclamationIcon, iconColor: 'text-blue-600', badge: 'bg-blue-100 text-blue-700' }
+    default: return { bg: 'bg-gray-50 border-gray-200', icon: BellAlertIcon, iconColor: 'text-gray-600', badge: 'bg-gray-100 text-gray-700' }
+  }
+}
+
+const getSeverityLabel = (severity) => {
+  if (severity === 'high') return 'Nghiêm trọng'
+  if (severity === 'medium') return 'Cảnh báo'
+  if (severity === 'low') return 'Lưu ý'
+  return 'Thông báo'
+}
+
+// === 4. THAO TÁC XỬ LÝ CẢNH BÁO ===
+const markAsResolved = (id) => {
+  const idx = alerts.value.findIndex(a => a.id === id)
+  if (idx !== -1) {
+    alerts.value[idx].status = 'resolved'
+  }
+}
+
+const resolveAll = () => {
+  if (confirm('Sếp có chắc chắn muốn đánh dấu ĐÃ ĐỌC cho tất cả cảnh báo hiện tại?')) {
+    alerts.value.forEach(a => a.status = 'resolved')
+  }
+}
 </script>
 
 <template>
   <div class="space-y-5 md:space-y-6 animate-fade-in pb-10 px-0 md:px-1">
-    
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
       <div>
-        <h2 class="text-xl md:text-2xl font-bold text-gray-800">Cảnh báo Tồn kho</h2>
-        <p class="text-xs md:text-sm text-gray-500 mt-1">Theo dõi các mặt hàng dưới mức tối thiểu hoặc quá hạn sử dụng</p>
+        <h2 class="text-xl md:text-2xl font-bold text-gray-800 flex items-center gap-2">
+          Trung Tâm Cảnh Báo <span class="bg-red-500 text-white text-xs px-2.5 py-0.5 rounded-full shadow-sm">{{ activeAlerts.length }}</span>
+        </h2>
+        <p class="text-xs md:text-sm text-gray-500 mt-1">Thông báo tự động từ hệ thống về hàng hóa và chứng từ</p>
       </div>
-      <button class="bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2.5 rounded-lg flex items-center gap-2 text-sm font-semibold shadow-sm transition-colors active:scale-95 justify-center">
-        <ArrowDownTrayIcon class="w-5 h-5" /> Xuất Danh sách
-      </button>
+      <div class="flex items-center gap-2">
+        <button @click="resolveAll" v-if="activeAlerts.length > 0" class="bg-white border border-gray-300 text-gray-700 px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-gray-50 transition-colors shadow-sm flex items-center gap-2">
+          <CheckCircleIcon class="w-5 h-5"/> Đánh dấu tất cả đã đọc
+        </button>
+      </div>
     </div>
 
-    <div class="bg-white p-3 md:p-4 rounded-xl border border-gray-200 flex flex-col sm:flex-row items-center gap-3 md:gap-4 shadow-sm">
-      <div class="relative w-full sm:flex-1 max-w-none sm:max-w-md">
-        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-          <MagnifyingGlassIcon class="w-5 h-5 text-gray-400" />
+    <div class="bg-white p-3 md:p-4 rounded-xl border border-gray-200 flex items-center justify-between shadow-sm">
+      <div class="flex items-center gap-3">
+        <span class="text-sm font-bold text-gray-700">Lọc mức độ:</span>
+        <select v-model="filterSeverity" class="border border-gray-200 rounded-lg text-sm px-4 py-2 outline-none focus:ring-1 focus:ring-primary-500 cursor-pointer">
+          <option value="">Tất cả mức độ</option>
+          <option value="high">Đỏ - Nghiêm trọng</option>
+          <option value="medium">Cam - Cảnh báo</option>
+          <option value="low">Xanh - Lưu ý</option>
+        </select>
+      </div>
+      <div class="text-sm text-gray-500 hidden sm:block">Đã giải quyết: <span class="font-bold text-emerald-600">{{ resolvedCount }}</span> cảnh báo</div>
+    </div>
+
+    <div v-if="activeAlerts.length === 0" class="bg-white border border-gray-200 border-dashed rounded-xl p-12 text-center shadow-sm">
+      <BellAlertIcon class="w-16 h-16 text-emerald-300 mx-auto mb-4" />
+      <h3 class="text-lg font-bold text-gray-800">Tuyệt vời! Không có cảnh báo nào.</h3>
+      <p class="text-sm text-gray-500 mt-2">Hệ thống kho đang hoạt động cực kỳ mượt mà và an toàn.</p>
+    </div>
+
+    <div v-else class="space-y-4">
+      <div v-for="alert in activeAlerts" :key="alert.id" class="rounded-xl border p-4 sm:p-5 flex flex-col sm:flex-row gap-4 transition-all hover:shadow-md items-start sm:items-center relative" :class="getAlertStyle(alert.severity).bg">
+        <div class="w-12 h-12 rounded-full bg-white flex items-center justify-center shrink-0 border border-gray-100 shadow-sm">
+          <component :is="getAlertStyle(alert.severity).icon" class="w-7 h-7" :class="getAlertStyle(alert.severity).iconColor" />
         </div>
-        <input type="text" class="block w-full pl-10 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-1 focus:ring-primary-500 outline-none" placeholder="Tìm mã SKU, tên SP cần cảnh báo...">
-      </div>
-      <select class="w-full sm:w-auto border border-gray-200 rounded-lg text-sm px-4 py-2 text-gray-600 outline-none focus:ring-1 focus:ring-primary-500 cursor-pointer">
-        <option value="">Tất cả loại cảnh báo</option>
-        <option value="duoi_min">Dưới định mức (Sắp hết)</option>
-        <option value="vuot_max">Vượt định mức (Tồn ứ)</option>
-        <option value="het_han">Cận Date / Hết hạn</option>
-      </select>
-    </div>
-
-    <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-      <div class="w-full overflow-x-auto custom-scrollbar">
-        <table class="min-w-[900px] w-full divide-y divide-gray-200">
-          <thead class="bg-gray-50">
-            <tr>
-              <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase">Mã SKU</th>
-              <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase">Tên Sản phẩm</th>
-              <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase">Loại cảnh báo</th>
-              <th class="px-5 py-3.5 text-right text-xs font-bold text-gray-500 uppercase">Tồn hiện tại</th>
-              <th class="px-5 py-3.5 text-right text-xs font-bold text-gray-500 uppercase">Định mức Min/Max</th>
-              <th class="px-5 py-3.5 text-right text-xs font-bold text-gray-500 uppercase">Hành động</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td colspan="6" class="px-6 py-16 md:py-24 text-center">
-                <div class="flex flex-col items-center justify-center">
-                  <div class="bg-green-50 p-4 rounded-full mb-4 shadow-inner">
-                    <BellAlertIcon class="w-10 h-10 md:w-12 md:h-12 text-green-500" />
-                  </div>
-                  <h3 class="text-sm md:text-base font-semibold text-gray-900">Không có cảnh báo nào</h3>
-                  <p class="text-xs md:text-sm text-gray-500 mt-2 max-w-sm mx-auto">Kho hàng đang duy trì ở mức lý tưởng. Các mặt hàng đều nằm trong định mức an toàn.</p>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="flex-1">
+          <div class="flex flex-wrap items-center gap-2 mb-1">
+            <h4 class="text-base font-bold text-gray-900">{{ alert.title }}</h4>
+            <span :class="['text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider', getAlertStyle(alert.severity).badge]">{{ getSeverityLabel(alert.severity) }}</span>
+          </div>
+          <p class="text-sm text-gray-700 mb-2 leading-relaxed max-w-4xl">{{ alert.message }}</p>
+          <div class="flex items-center gap-4 text-xs font-medium text-gray-500">
+            <span class="flex items-center gap-1"><ClockIcon class="w-4 h-4"/> {{ alert.time }}</span>
+            <span class="text-gray-300">|</span>
+            <a href="#" class="text-primary-600 hover:text-primary-800 flex items-center gap-1 font-bold underline underline-offset-2"><ArrowUturnRightIcon class="w-3.5 h-3.5" /> {{ alert.actionLink }}</a>
+          </div>
+        </div>
+        <div class="w-full sm:w-auto flex justify-end shrink-0 mt-2 sm:mt-0">
+          <button @click="markAsResolved(alert.id)" class="px-4 py-2 bg-white hover:bg-gray-50 border border-gray-300 text-gray-700 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2 w-full sm:w-auto justify-center shadow-sm hover:shadow">
+            <CheckCircleIcon class="w-5 h-5 text-emerald-500"/> Xong, Đóng lại!
+          </button>
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.custom-scrollbar::-webkit-scrollbar { height: 6px; }
-.custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-.custom-scrollbar::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
-.custom-scrollbar:hover::-webkit-scrollbar-thumb { background: #cbd5e1; }
 </style>

@@ -6,47 +6,12 @@ import {
   PrinterIcon
 } from '@heroicons/vue/24/outline'
 
-// === 1. STATE CHÍNH: DỮ LIỆU MẪU ĐIỀU CHUYỂN ===
-const transferReceipts = ref([
-  {
-    id: 1, code: 'PDC0001', date: '2026-03-24',
-    fromWarehouseId: 'KHO-HN', fromWarehouseName: 'Tổng kho Miền Bắc (Hà Nội)',
-    toWarehouseId: 'KHO-DN', toWarehouseName: 'Trung tâm Phân phối Đà Nẵng',
-    totalQty: 150,
-    status: 'completed', // Đã nhận hàng
-    note: 'Điều chuyển hàng bổ sung cho miền Trung',
-    items: [
-      { sku: 'SKU-002', name: 'Bột giặt OMO 3.6kg', unit: 'Túi', qty: 100 },
-      { sku: 'SKU-004', name: 'Bàn phím cơ Keychron K8', unit: 'Cái', qty: 50 }
-    ]
-  },
-  {
-    id: 2, code: 'PDC0002', date: '2026-03-26',
-    fromWarehouseId: 'KHO-HCM', fromWarehouseName: 'Chi nhánh Miền Nam (TP.HCM)',
-    toWarehouseId: 'KHO-CT', toWarehouseName: 'Trạm trung chuyển Cần Thơ',
-    totalQty: 20,
-    status: 'transferring', // Đang luân chuyển
-    note: 'Chuyển gấp bằng xe tải biển số 51C-12345',
-    items: [
-      { sku: 'SKU-001', name: 'Laptop Dell XPS 15', unit: 'Cái', qty: 20 }
-    ]
-  }
-])
+// === 1. STATE CHÍNH: TRỐNG CHỜ API ===
+const transferReceipts = ref([])
 
-// === 2. MOCK DATA BỔ TRỢ ===
-const mockWarehouses = ref([
-  { id: 'KHO-HN', name: 'Tổng kho Miền Bắc (Hà Nội)' },
-  { id: 'KHO-DN', name: 'Trung tâm Phân phối Đà Nẵng' },
-  { id: 'KHO-HCM', name: 'Chi nhánh Miền Nam (TP.HCM)' },
-  { id: 'KHO-CT', name: 'Trạm trung chuyển Cần Thơ' }
-])
-
-const mockProducts = ref([
-  { sku: 'SKU-001', name: 'Laptop Dell XPS 15', unit: 'Cái' },
-  { sku: 'SKU-002', name: 'Bột giặt OMO 3.6kg', unit: 'Túi' },
-  { sku: 'SKU-003', name: 'Màn hình LG 27"', unit: 'Cái' },
-  { sku: 'SKU-004', name: 'Bàn phím cơ Keychron K8', unit: 'Cái' }
-])
+// === 2. MOCK DATA BỔ TRỢ: TRỐNG CHỜ API ===
+const mockWarehouses = ref([])
+const mockProducts = ref([])
 
 // === 3. BỘ LỌC TÌM KIẾM ===
 const searchQuery = ref('')
@@ -55,8 +20,8 @@ const filterStatus = ref('')
 const filteredReceipts = computed(() => {
   return transferReceipts.value.filter(r => {
     const matchSearch = r.code.toLowerCase().includes(searchQuery.value.toLowerCase()) || 
-                        r.fromWarehouseName.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
-                        r.toWarehouseName.toLowerCase().includes(searchQuery.value.toLowerCase())
+                        (r.fromWarehouseName && r.fromWarehouseName.toLowerCase().includes(searchQuery.value.toLowerCase())) ||
+                        (r.toWarehouseName && r.toWarehouseName.toLowerCase().includes(searchQuery.value.toLowerCase()))
     const matchStatus = filterStatus.value === '' || r.status === filterStatus.value
     return matchSearch && matchStatus
   }).sort((a, b) => b.id - a.id)
@@ -95,10 +60,9 @@ const getStatusBadge = (status) => {
   }
 }
 
-// Lắng nghe sự kiện để tránh chọn trùng kho
 const handleFromWarehouseChange = () => {
   if (formData.value.fromWarehouseId === formData.value.toWarehouseId) {
-    formData.value.toWarehouseId = '' // Reset kho đến nếu bị trùng
+    formData.value.toWarehouseId = '' 
   }
 }
 
@@ -129,8 +93,8 @@ const handleSubmit = () => {
     transferReceipts.value.push({
       ...formData.value, id: Date.now(), code: generateReceiptCode(),
       totalQty: totalQty.value,
-      fromWarehouseName: mockWarehouses.value.find(w => w.id === formData.value.fromWarehouseId)?.name,
-      toWarehouseName: mockWarehouses.value.find(w => w.id === formData.value.toWarehouseId)?.name
+      fromWarehouseName: mockWarehouses.value.find(w => w.id === formData.value.fromWarehouseId)?.name || 'Chưa rõ',
+      toWarehouseName: mockWarehouses.value.find(w => w.id === formData.value.toWarehouseId)?.name || 'Chưa rõ'
     })
     alert('Tạo Phiếu Điều Chuyển thành công!')
   }
@@ -142,13 +106,12 @@ const handlePrintReceipt = () => alert(`Đang xuất lệnh máy in: IN PHIẾU 
 
 <template>
   <div class="space-y-5 md:space-y-6 animate-fade-in pb-10 px-0 md:px-1 relative">
-    
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
       <div>
         <h2 class="text-xl md:text-2xl font-bold text-gray-800">Điều chuyển Nội bộ (Transfer)</h2>
         <p class="text-xs md:text-sm text-gray-500 mt-1">Lập chứng từ luân chuyển hàng hóa giữa các kho và chi nhánh</p>
       </div>
-      <button @click="openModal('add')" class="bg-primary-600 hover:bg-primary-700 text-white px-4 py-2.5 rounded-lg flex items-center gap-2 text-sm font-semibold transition-colors shadow-sm">
+      <button @click="openModal('add')" class="bg-primary-600 hover:bg-primary-700 text-white px-4 py-2.5 rounded-lg flex items-center gap-2 text-sm font-semibold shadow-sm">
         <PlusIcon class="w-5 h-5" /> Lập Phiếu Điều Chuyển
       </button>
     </div>
@@ -187,20 +150,15 @@ const handlePrintReceipt = () => alert(`Đang xuất lệnh máy in: IN PHIẾU 
                 <h3 class="text-base font-semibold text-gray-700">Chưa có Phiếu Điều chuyển nào</h3>
               </td>
             </tr>
-
-            <tr v-for="receipt in filteredReceipts" :key="receipt.id" class="hover:bg-gray-50 transition-colors">
+            <tr v-for="receipt in filteredReceipts" :key="receipt.id" class="hover:bg-gray-50">
               <td class="px-5 py-3 text-sm font-bold text-primary-700">{{ receipt.code }}</td>
               <td class="px-5 py-3 text-sm font-medium text-gray-600">{{ receipt.date }}</td>
               <td class="px-5 py-3 text-sm font-bold text-orange-700">{{ receipt.fromWarehouseName }}</td>
               <td class="px-5 py-3 text-sm font-bold text-emerald-700">{{ receipt.toWarehouseName }}</td>
               <td class="px-5 py-3 text-sm text-center font-bold text-gray-900">{{ receipt.totalQty }}</td>
-              <td class="px-5 py-3 text-center">
-                <span :class="['text-[10px] font-bold px-2 py-1 rounded border uppercase tracking-wider', getStatusBadge(receipt.status).class]">
-                  {{ getStatusBadge(receipt.status).text }}
-                </span>
-              </td>
+              <td class="px-5 py-3 text-center"><span :class="['text-[10px] font-bold px-2 py-1 rounded border uppercase tracking-wider', getStatusBadge(receipt.status).class]">{{ getStatusBadge(receipt.status).text }}</span></td>
               <td class="px-5 py-3 text-right">
-                <button @click="openModal('view', receipt)" class="px-3 py-1.5 text-blue-600 hover:bg-blue-50 rounded bg-blue-50 border border-blue-100 font-medium text-xs flex items-center gap-1 ml-auto transition-colors">
+                <button @click="openModal('view', receipt)" class="px-3 py-1.5 text-blue-600 hover:bg-blue-50 rounded bg-blue-50 border border-blue-100 font-medium text-xs flex items-center gap-1 ml-auto">
                   <EyeIcon class="w-4 h-4" /> Chi tiết
                 </button>
               </td>
@@ -213,148 +171,85 @@ const handlePrintReceipt = () => alert(`Đang xuất lệnh máy in: IN PHIẾU 
     <Teleport to="body">
       <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center px-4 bg-slate-900/50 backdrop-blur-sm animate-fade-in">
         <div class="bg-white rounded-xl shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[90vh]">
-          
-          <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50 shrink-0">
-            <h3 class="text-lg font-bold text-gray-800 flex items-center gap-2">
-              <ArrowsRightLeftIcon class="w-6 h-6 text-primary-600"/> 
-              {{ modalMode === 'add' ? 'Lập Phiếu Điều Chuyển Mới' : `Chi tiết Phiếu: ${formData.code}` }}
-            </h3>
+          <div class="px-6 py-4 border-b flex items-center justify-between bg-gray-50 shrink-0">
+            <h3 class="text-lg font-bold flex items-center gap-2"><ArrowsRightLeftIcon class="w-6 h-6 text-primary-600"/> {{ modalMode === 'add' ? 'Lập Phiếu Điều Chuyển' : `Chi tiết: ${formData.code}` }}</h3>
             <button @click="closeModal" class="text-gray-400 hover:text-red-500"><XMarkIcon class="w-6 h-6" /></button>
           </div>
-
           <div class="p-6 overflow-y-auto flex-1 custom-scrollbar">
             <form id="transferForm" @submit.prevent="handleSubmit" class="space-y-6">
-              
               <div class="bg-slate-50 p-4 rounded-lg border border-slate-200">
-                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4 border-b border-slate-200 pb-4">
-                  <div>
-                    <label class="block text-xs font-bold text-gray-700 mb-1">Mã Phiếu</label>
-                    <input v-model="formData.code" type="text" disabled class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-100 italic" placeholder="Tự động sinh">
-                  </div>
-                  <div>
-                    <label class="block text-xs font-bold text-gray-700 mb-1">Ngày luân chuyển <span class="text-red-500">*</span></label>
-                    <input v-model="formData.date" :disabled="modalMode === 'view'" type="date" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-primary-500 disabled:bg-gray-100 disabled:text-gray-500">
-                  </div>
-                  <div>
-                    <label class="block text-xs font-bold text-gray-700 mb-1">Trạng thái</label>
-                    <select v-model="formData.status" :disabled="modalMode === 'view'" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-primary-500 font-semibold disabled:bg-gray-100 disabled:text-gray-600" :class="getStatusBadge(formData.status).class">
-                      <option value="pending">Chờ xuất kho</option>
-                      <option value="transferring">Đang luân chuyển</option>
-                      <option value="completed">Đã nhận đủ (Chốt)</option>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4 border-b pb-4">
+                  <div><label class="block text-xs font-bold mb-1">Mã Phiếu</label><input v-model="formData.code" type="text" disabled class="w-full border rounded-lg px-3 py-2 text-sm bg-gray-100 italic" placeholder="Tự động sinh"></div>
+                  <div><label class="block text-xs font-bold mb-1">Ngày luân chuyển *</label><input v-model="formData.date" :disabled="modalMode === 'view'" type="date" required class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-primary-500 disabled:bg-gray-100"></div>
+                  <div><label class="block text-xs font-bold mb-1">Trạng thái</label>
+                    <select v-model="formData.status" :disabled="modalMode === 'view'" class="w-full border rounded-lg px-3 py-2 text-sm font-semibold disabled:bg-gray-100" :class="getStatusBadge(formData.status).class">
+                      <option value="pending">Chờ xuất kho</option><option value="transferring">Đang luân chuyển</option><option value="completed">Đã nhận đủ (Chốt)</option>
                     </select>
                   </div>
                 </div>
 
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
                   <div class="bg-orange-50 p-3 rounded border border-orange-100">
-                    <label class="block text-xs font-bold text-orange-800 mb-1">TỪ KHO (Kho xuất) <span class="text-red-500">*</span></label>
-                    <select v-model="formData.fromWarehouseId" @change="handleFromWarehouseChange" :disabled="modalMode === 'view'" required class="w-full border border-orange-200 rounded-lg px-3 py-2 text-sm focus:ring-orange-500 bg-white disabled:bg-gray-100 disabled:text-gray-600 cursor-pointer">
+                    <label class="block text-xs font-bold text-orange-800 mb-1">TỪ KHO (Kho xuất) *</label>
+                    <select v-model="formData.fromWarehouseId" @change="handleFromWarehouseChange" :disabled="modalMode === 'view'" required class="w-full border border-orange-200 rounded-lg px-3 py-2 text-sm focus:ring-orange-500 disabled:bg-gray-100">
                       <option value="" disabled>-- Chọn Kho Xuất --</option>
-                      <option v-for="wh in mockWarehouses" :key="wh.id" :value="wh.id">
-                        {{ wh.name }}
-                      </option>
+                      <option v-for="wh in mockWarehouses" :key="wh.id" :value="wh.id">{{ wh.name }}</option>
                     </select>
                   </div>
-                  
                   <div class="bg-emerald-50 p-3 rounded border border-emerald-100">
-                    <label class="block text-xs font-bold text-emerald-800 mb-1">ĐẾN KHO (Kho nhập) <span class="text-red-500">*</span></label>
-                    <select v-model="formData.toWarehouseId" :disabled="modalMode === 'view'" required class="w-full border border-emerald-200 rounded-lg px-3 py-2 text-sm focus:ring-emerald-500 bg-white disabled:bg-gray-100 disabled:text-gray-600 cursor-pointer">
+                    <label class="block text-xs font-bold text-emerald-800 mb-1">ĐẾN KHO (Kho nhập) *</label>
+                    <select v-model="formData.toWarehouseId" :disabled="modalMode === 'view'" required class="w-full border border-emerald-200 rounded-lg px-3 py-2 text-sm focus:ring-emerald-500 disabled:bg-gray-100">
                       <option value="" disabled>-- Chọn Kho Nhập --</option>
-                      <option v-for="wh in mockWarehouses" :key="wh.id" :value="wh.id" :disabled="wh.id === formData.fromWarehouseId" :class="wh.id === formData.fromWarehouseId ? 'bg-gray-100 text-gray-400' : ''">
-                        {{ wh.name }} {{ wh.id === formData.fromWarehouseId ? '(Đang là kho xuất)' : '' }}
-                      </option>
+                      <option v-for="wh in mockWarehouses" :key="wh.id" :value="wh.id" :disabled="wh.id === formData.fromWarehouseId" :class="wh.id === formData.fromWarehouseId ? 'bg-gray-100 text-gray-400' : ''">{{ wh.name }} {{ wh.id === formData.fromWarehouseId ? '(Đang là kho xuất)' : '' }}</option>
                     </select>
                   </div>
                 </div>
               </div>
 
               <div>
-                <div class="flex items-center justify-between mb-2">
-                  <h4 class="text-sm font-bold text-slate-800">Danh sách Hàng hóa Điều chuyển</h4>
-                </div>
-
+                <h4 class="text-sm font-bold mb-2">Danh sách Hàng hóa Điều chuyển</h4>
                 <div v-if="modalMode === 'add'" class="flex flex-col sm:flex-row gap-2 mb-3 bg-blue-50 p-3 rounded-lg border border-blue-100">
-                  <select v-model="selectedSkuToAdd" class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-primary-500 cursor-pointer">
-                    <option value="" disabled>-- Chọn Sản phẩm cần luân chuyển --</option>
-                    <option v-for="prod in mockProducts" :key="prod.sku" :value="prod.sku">
-                      {{ prod.sku }} - {{ prod.name }}
-                    </option>
+                  <select v-model="selectedSkuToAdd" class="flex-1 border rounded-lg px-3 py-2 text-sm focus:ring-primary-500">
+                    <option value="" disabled>-- Chọn Sản phẩm --</option>
+                    <option v-for="prod in mockProducts" :key="prod.sku" :value="prod.sku">{{ prod.sku }} - {{ prod.name }}</option>
                   </select>
-                  <button type="button" @click="handleAddItem" :disabled="!selectedSkuToAdd" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-50 transition-colors whitespace-nowrap">
-                    Thêm vào Lưới
-                  </button>
+                  <button type="button" @click="handleAddItem" :disabled="!selectedSkuToAdd" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-50">Thêm vào Lưới</button>
                 </div>
 
-                <div class="border border-gray-200 rounded-lg overflow-x-auto">
+                <div class="border rounded-lg overflow-x-auto">
                   <table class="w-full text-sm text-left">
                     <thead class="bg-gray-50 text-xs uppercase font-bold text-gray-500">
-                      <tr>
-                        <th class="px-4 py-3">Mã SKU</th>
-                        <th class="px-4 py-3">Tên Hàng</th>
-                        <th class="px-4 py-3 text-center">ĐVT</th>
-                        <th class="px-4 py-3 text-center w-32">Số lượng Chuyển</th>
-                        <th v-if="modalMode === 'add'" class="px-4 py-3 text-center w-10">#</th>
-                      </tr>
+                      <tr><th class="px-4 py-3">Mã SKU</th><th class="px-4 py-3">Tên Hàng</th><th class="px-4 py-3 text-center">ĐVT</th><th class="px-4 py-3 text-center w-32">SL Chuyển</th><th v-if="modalMode === 'add'" class="px-4 py-3 text-center w-10">#</th></tr>
                     </thead>
                     <tbody class="divide-y divide-gray-100">
-                      <tr v-if="formData.items.length === 0">
-                        <td :colspan="modalMode === 'add' ? 5 : 4" class="px-4 py-8 text-center text-gray-400 italic">
-                          Chưa có mặt hàng nào cần điều chuyển.
-                        </td>
-                      </tr>
+                      <tr v-if="formData.items.length === 0"><td :colspan="modalMode === 'add' ? 5 : 4" class="px-4 py-8 text-center text-gray-400 italic">Chưa có mặt hàng nào.</td></tr>
                       <tr v-for="(item, idx) in formData.items" :key="idx" class="hover:bg-gray-50">
-                        <td class="px-4 py-2 font-bold text-gray-700">{{ item.sku }}</td>
-                        <td class="px-4 py-2 font-medium">{{ item.name }}</td>
-                        <td class="px-4 py-2 text-center text-gray-500">{{ item.unit }}</td>
-                        <td class="px-4 py-2 text-center">
-                          <input v-if="modalMode === 'add'" v-model.number="item.qty" type="number" min="1" class="w-full text-center border border-gray-300 rounded px-2 py-1 font-bold text-blue-700 focus:outline-none focus:ring-1 focus:ring-blue-500">
-                          <span v-else class="font-bold text-blue-700">{{ item.qty }}</span>
-                        </td>
-                        <td v-if="modalMode === 'add'" class="px-4 py-2 text-center">
-                          <button type="button" @click="removeItem(idx)" class="text-red-400 hover:text-red-600"><TrashIcon class="w-5 h-5 mx-auto"/></button>
-                        </td>
+                        <td class="px-4 py-2 font-bold">{{ item.sku }}</td><td class="px-4 py-2">{{ item.name }}</td><td class="px-4 py-2 text-center">{{ item.unit }}</td>
+                        <td class="px-4 py-2 text-center"><input v-if="modalMode === 'add'" v-model.number="item.qty" type="number" min="1" class="w-full text-center border rounded px-2 py-1 font-bold text-blue-700"><span v-else class="font-bold text-blue-700">{{ item.qty }}</span></td>
+                        <td v-if="modalMode === 'add'" class="px-4 py-2 text-center"><button type="button" @click="removeItem(idx)" class="text-red-400 hover:text-red-600"><TrashIcon class="w-5 h-5 mx-auto"/></button></td>
                       </tr>
                     </tbody>
-                    <tfoot class="bg-gray-50 font-bold border-t border-gray-200">
-                      <tr>
-                        <td colspan="3" class="px-4 py-3 text-right uppercase text-gray-600">Tổng Số Lượng:</td>
-                        <td class="px-4 py-3 text-center text-blue-700 text-base">{{ totalQty }}</td>
-                        <td v-if="modalMode === 'add'"></td>
-                      </tr>
-                    </tfoot>
+                    <tfoot class="bg-gray-50 font-bold border-t"><td colspan="3" class="px-4 py-3 text-right uppercase">Tổng SL:</td><td class="px-4 py-3 text-center text-blue-700">{{ totalQty }}</td><td v-if="modalMode === 'add'"></td></tfoot>
                   </table>
                 </div>
               </div>
 
-              <div>
-                <label class="block text-xs font-bold text-gray-700 mb-1">Ghi chú / Thông tin xe tải</label>
-                <textarea v-model="formData.note" :disabled="modalMode === 'view'" rows="2" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-primary-500 disabled:bg-gray-100 disabled:text-gray-500" placeholder="VD: Giao bằng xe tải biển số 51C..."></textarea>
-              </div>
-
+              <div><label class="block text-xs font-bold mb-1">Ghi chú</label><textarea v-model="formData.note" :disabled="modalMode === 'view'" rows="2" class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-primary-500 disabled:bg-gray-100" placeholder="..."></textarea></div>
             </form>
           </div>
 
-          <div class="px-6 py-4 border-t border-gray-100 flex flex-col sm:flex-row justify-between items-center gap-3 bg-white shrink-0">
+          <div class="px-6 py-4 border-t flex flex-col sm:flex-row justify-between gap-3 shrink-0">
             <div class="flex gap-2 w-full sm:w-auto">
-              <button v-if="modalMode === 'view'" @click="handlePrintReceipt" class="flex-1 sm:flex-none px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm font-bold transition-colors flex items-center justify-center gap-2 border border-slate-200 shadow-sm">
-                <PrinterIcon class="w-5 h-5"/> In Phiếu Điều Chuyển
-              </button>
+              <button v-if="modalMode === 'view'" @click="handlePrintReceipt" class="flex-1 sm:flex-none px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm font-bold border"><PrinterIcon class="w-5 h-5 inline mr-1"/> In Phiếu</button>
             </div>
-
             <div class="flex gap-2 w-full sm:w-auto">
-              <button type="button" @click="closeModal" class="flex-1 sm:flex-none px-5 py-2.5 border border-gray-300 text-gray-700 rounded-lg text-sm font-semibold hover:bg-gray-50 transition-colors text-center">
-                {{ modalMode === 'view' ? 'Đóng lại' : 'Hủy bỏ' }}
-              </button>
-              <button v-if="modalMode === 'add'" type="submit" form="transferForm" class="flex-1 sm:flex-none px-5 py-2.5 bg-primary-600 text-white rounded-lg text-sm font-bold hover:bg-primary-700 shadow-md transition-colors flex items-center justify-center gap-2">
-                <ArrowsRightLeftIcon class="w-5 h-5"/> Hoàn tất Phiếu
-              </button>
+              <button type="button" @click="closeModal" class="flex-1 sm:flex-none px-5 py-2.5 border rounded-lg text-sm font-semibold hover:bg-gray-50">{{ modalMode === 'view' ? 'Đóng lại' : 'Hủy bỏ' }}</button>
+              <button v-if="modalMode === 'add'" type="submit" form="transferForm" class="flex-1 sm:flex-none px-5 py-2.5 bg-primary-600 text-white rounded-lg text-sm font-bold hover:bg-primary-700 shadow-md"><ArrowsRightLeftIcon class="w-5 h-5 inline mr-1"/> Hoàn tất Phiếu</button>
             </div>
           </div>
-
         </div>
       </div>
     </Teleport>
-
   </div>
 </template>
 
@@ -362,5 +257,4 @@ const handlePrintReceipt = () => alert(`Đang xuất lệnh máy in: IN PHIẾU 
 .custom-scrollbar::-webkit-scrollbar { height: 6px; width: 6px; }
 .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
 .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-.custom-scrollbar:hover::-webkit-scrollbar-thumb { background: #94a3b8; }
 </style>

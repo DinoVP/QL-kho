@@ -1,127 +1,135 @@
 <script setup>
-import { ArchiveBoxIcon, ArrowDownTrayIcon, ArrowUpTrayIcon, CurrencyDollarIcon } from '@heroicons/vue/24/outline'
-import VueApexCharts from 'vue3-apexcharts'
+import { ref, computed } from 'vue'
+import { 
+  ChartBarIcon, ArrowTrendingUpIcon, ArrowTrendingDownIcon, 
+  CubeIcon, CurrencyDollarIcon, PresentationChartLineIcon,
+  ExclamationCircleIcon, ChartPieIcon, BuildingStorefrontIcon,
+  DocumentArrowDownIcon, DocumentArrowUpIcon, PresentationChartBarIcon
+} from '@heroicons/vue/24/outline'
 
-// === CẤU HÌNH HIỂN THỊ KHI KHÔNG CÓ DATA ===
-const noDataConfig = {
-  text: 'Chưa có dữ liệu',
-  align: 'center',
-  verticalAlign: 'middle',
-  style: { color: '#9ca3af', fontSize: '14px', fontFamily: 'Inter, sans-serif' }
-}
+// === 1. THỐNG KÊ TỔNG QUAN (VỀ 0) ===
+const stats = ref({
+  totalValue: '0 ₫', inboundThisMonth: 0, outboundThisMonth: 0, pendingOrders: 0, activeAlerts: 0
+})
 
-// === 1. BIỂU ĐỒ ĐƯỜNG/DIỆN TÍCH (Trống) ===
-const areaOptions = {
-  chart: { type: 'area', toolbar: { show: false }, fontFamily: 'Inter, sans-serif' },
-  colors: ['#3b82f6', '#f97316'],
-  dataLabels: { enabled: false },
-  stroke: { curve: 'smooth', width: 2 },
-  xaxis: { categories: ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'] },
-  noData: noDataConfig, // Bật chế độ không có dữ liệu
-  legend: { position: 'top', horizontalAlign: 'right' }
-}
-const areaSeries = [] // Trả về mảng rỗng
+// === 2. DỮ LIỆU BIỂU ĐỒ: TRỐNG CHỜ API ===
+const inboundChartData = ref([])
+const outboundChartData = ref([])
 
-// === 2. BIỂU ĐỒ TRÒN (Trống) ===
-const donutOptions = {
-  chart: { type: 'donut', fontFamily: 'Inter, sans-serif' },
-  labels: [],
-  colors: ['#3b82f6', '#10b981', '#f59e0b', '#6366f1'],
-  noData: noDataConfig, // Bật chế độ không có dữ liệu
-  plotOptions: { pie: { donut: { size: '70%' } } },
-}
-const donutSeries = [] // Trả về mảng rỗng
+// Xử lý chia cho 0 khi chưa có data
+const maxInbound = computed(() => inboundChartData.value.length ? Math.max(...inboundChartData.value.map(d => d.value)) : 1)
+const maxOutbound = computed(() => outboundChartData.value.length ? Math.max(...outboundChartData.value.map(d => d.value)) : 1)
 
-// === 3. BIỂU ĐỒ CỘT NGANG (Trống) ===
-const barOptions = {
-  chart: { type: 'bar', toolbar: { show: false }, fontFamily: 'Inter, sans-serif' },
-  plotOptions: { bar: { horizontal: true, borderRadius: 4 } },
-  colors: ['#10b981'],
-  noData: noDataConfig, // Bật chế độ không có dữ liệu
-}
-const barSeries = [] // Trả về mảng rỗng
+// === 3. DỮ LIỆU BIỂU ĐỒ TRÒN ===
+const pieChartData = ref([])
+const pieGradient = computed(() => {
+  if (pieChartData.value.length === 0) return 'conic-gradient(#f1f5f9 0% 100%)' // Màu xám trống
+  // Logic vẽ (khi có data từ API)
+  return 'conic-gradient(#f1f5f9 0% 100%)' 
+})
 
-// === 4. BIỂU ĐỒ VÒNG CUNG (Trống - 0%) ===
-const radialOptions = {
-  chart: { type: 'radialBar', fontFamily: 'Inter, sans-serif' },
-  plotOptions: {
-    radialBar: {
-      hollow: { size: '65%' },
-      dataLabels: {
-        name: { show: true, color: '#6b7280', fontSize: '13px' },
-        value: { show: true, color: '#111827', fontSize: '30px', fontWeight: 'bold' }
-      }
-    }
-  },
-  colors: ['#ef4444'],
-  labels: ['Đã lấp đầy']
-}
-const radialSeries = [0] // Công suất 0% vì chưa có hàng
+// === 4. TỈ LỆ LẤP ĐẦY KHO ===
+const warehouseCapacity = ref([])
+
+// === 5. TOP HÀNG HÓA ===
+const topProducts = ref([])
 </script>
 
 <template>
-  <div class="space-y-6 md:space-y-8 animate-fade-in pb-10 px-0 md:px-1">
+  <div class="space-y-6 animate-fade-in pb-10 px-0 md:px-1">
     
-    <div>
-      <h2 class="text-xl md:text-2xl font-bold text-gray-800">Dashboard Phân tích</h2>
-      <p class="text-xs md:text-sm text-gray-500 mt-1">Hệ thống đang chờ đồng bộ dữ liệu từ các giao dịch kho hàng</p>
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div>
+        <h2 class="text-xl md:text-2xl font-bold text-gray-800">Tổng quan Hệ thống (Dashboard)</h2>
+        <p class="text-xs md:text-sm text-gray-500 mt-1">Trung tâm điều khiển và báo cáo đồ thị trực quan</p>
+      </div>
+      <button class="bg-primary-600 hover:bg-primary-700 text-white px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors shadow-sm flex items-center gap-2">
+        <PresentationChartLineIcon class="w-5 h-5"/> Tải File PDF Báo Cáo
+      </button>
     </div>
 
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
-      <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-        <div class="p-3 bg-blue-50 text-blue-600 rounded-lg w-fit mb-3"><ArchiveBoxIcon class="w-6 h-6" /></div>
-        <p class="text-sm font-medium text-gray-500">Tổng mặt hàng (SKU)</p>
-        <p class="text-2xl font-bold text-gray-900 mt-1">0</p>
+      <div class="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex flex-col relative overflow-hidden group hover:shadow-md transition-shadow">
+        <div class="absolute -right-4 -top-4 w-16 h-16 bg-blue-50 rounded-full group-hover:scale-150 transition-transform duration-500"></div>
+        <div class="flex items-center justify-between mb-4 relative z-10"><h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider">Tổng Giá Trị Tồn</h3><CurrencyDollarIcon class="w-6 h-6 text-blue-500" /></div>
+        <p class="text-2xl font-extrabold text-gray-800 relative z-10">{{ stats.totalValue }}</p>
+        <p class="text-xs font-medium text-gray-400 mt-2 relative z-10 flex items-center gap-1">Chờ dữ liệu...</p>
       </div>
-
-      <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-        <div class="p-3 bg-green-50 text-green-600 rounded-lg w-fit mb-3"><ArrowDownTrayIcon class="w-6 h-6" /></div>
-        <p class="text-sm font-medium text-gray-500">Nhập kho (Tháng này)</p>
-        <p class="text-2xl font-bold text-gray-900 mt-1">0 <span class="text-sm font-normal text-gray-500">Phiếu</span></p>
+      <div class="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex flex-col relative overflow-hidden group hover:shadow-md transition-shadow">
+        <div class="absolute -right-4 -top-4 w-16 h-16 bg-emerald-50 rounded-full group-hover:scale-150 transition-transform duration-500"></div>
+        <div class="flex items-center justify-between mb-4 relative z-10"><h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider">Phiếu Nhập (Tháng)</h3><DocumentArrowDownIcon class="w-6 h-6 text-emerald-500" /></div>
+        <p class="text-3xl font-extrabold text-gray-800 relative z-10">{{ stats.inboundThisMonth }}</p>
+        <p class="text-xs font-medium text-gray-400 mt-2 relative z-10">Chờ dữ liệu...</p>
       </div>
-
-      <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-        <div class="p-3 bg-orange-50 text-orange-600 rounded-lg w-fit mb-3"><ArrowUpTrayIcon class="w-6 h-6" /></div>
-        <p class="text-sm font-medium text-gray-500">Xuất kho (Tháng này)</p>
-        <p class="text-2xl font-bold text-gray-900 mt-1">0 <span class="text-sm font-normal text-gray-500">Phiếu</span></p>
+      <div class="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex flex-col relative overflow-hidden group hover:shadow-md transition-shadow">
+        <div class="absolute -right-4 -top-4 w-16 h-16 bg-amber-50 rounded-full group-hover:scale-150 transition-transform duration-500"></div>
+        <div class="flex items-center justify-between mb-4 relative z-10"><h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider">Phiếu Xuất (Tháng)</h3><DocumentArrowUpIcon class="w-6 h-6 text-amber-500" /></div>
+        <p class="text-3xl font-extrabold text-gray-800 relative z-10">{{ stats.outboundThisMonth }}</p>
+        <p class="text-xs font-medium text-amber-600 mt-2 relative z-10 flex items-center gap-1">{{ stats.pendingOrders }} đơn đang chờ xử lý</p>
       </div>
-
-      <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-        <div class="p-3 bg-purple-50 text-purple-600 rounded-lg w-fit mb-3"><CurrencyDollarIcon class="w-6 h-6" /></div>
-        <p class="text-sm font-medium text-gray-500">Ước tính Giá trị Tồn</p>
-        <p class="text-2xl font-bold text-gray-900 mt-1">0 <span class="text-sm font-normal text-gray-500">VNĐ</span></p>
-      </div>
-    </div>
-
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
-      <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-5 lg:col-span-2">
-        <h3 class="text-gray-800 font-bold mb-1">Lưu lượng Nhập / Xuất kho</h3>
-        <p class="text-xs text-gray-500 mb-4">Chưa có giao dịch trong 7 ngày qua</p>
-        <VueApexCharts type="area" height="300" :options="areaOptions" :series="areaSeries" />
-      </div>
-
-      <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-5 lg:col-span-1">
-        <h3 class="text-gray-800 font-bold mb-1">Cơ cấu Tồn kho</h3>
-        <p class="text-xs text-gray-500 mb-4">Kho hiện tại đang trống</p>
-        <VueApexCharts type="donut" height="320" :options="donutOptions" :series="donutSeries" />
+      <div class="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex flex-col relative overflow-hidden group hover:shadow-md transition-shadow">
+        <div class="absolute -right-4 -top-4 w-16 h-16 bg-red-50 rounded-full group-hover:scale-150 transition-transform duration-500"></div>
+        <div class="flex items-center justify-between mb-4 relative z-10"><h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider">Cảnh báo tồn kho</h3><ExclamationCircleIcon class="w-6 h-6 text-red-500" /></div>
+        <p class="text-3xl font-extrabold text-red-600 relative z-10">{{ stats.activeAlerts }}</p>
+        <p class="text-xs font-medium text-red-500 mt-2 relative z-10">Hết hàng hoặc dưới định mức</p>
       </div>
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
-      <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-5 lg:col-span-2">
-        <h3 class="text-gray-800 font-bold mb-1">Top 5 Sản phẩm Xuất nhiều nhất</h3>
-        <p class="text-xs text-gray-500 mb-4">Chưa có thống kê xuất hàng</p>
-        <VueApexCharts type="bar" height="300" :options="barOptions" :series="barSeries" />
+    <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 md:p-6">
+      <div class="flex items-center justify-between mb-6">
+        <h3 class="text-base font-bold text-gray-800 flex items-center gap-2"><PresentationChartBarIcon class="w-5 h-5 text-indigo-500"/> Biến động Giá trị Tồn kho (Tỷ VNĐ)</h3>
+      </div>
+      <div class="w-full h-48 sm:h-64 flex items-center justify-center border border-gray-100 bg-gray-50 rounded-lg border-dashed">
+        <span class="text-gray-400 text-sm font-medium">Hệ thống đang chờ đồng bộ số liệu tài chính...</span>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 md:p-6 flex flex-col">
+        <div class="flex items-center justify-between mb-6">
+          <h3 class="text-base font-bold text-gray-800 flex items-center gap-2"><DocumentArrowDownIcon class="w-5 h-5 text-emerald-500"/> Thống kê Nhập Kho (Phiếu)</h3>
+        </div>
+        <div class="flex-1 min-h-[200px] flex items-center justify-center bg-gray-50 rounded-lg border border-dashed border-gray-200">
+           <span class="text-gray-400 text-sm font-medium">Chưa có dữ liệu Nhập kho</span>
+        </div>
       </div>
 
-      <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-5 lg:col-span-1 flex flex-col">
-        <h3 class="text-gray-800 font-bold mb-1">Công suất chứa (Kho Tổng)</h3>
-        <p class="text-xs text-gray-500 mb-4">Kho đang hoàn toàn trống</p>
-        <div class="flex-1 flex items-center justify-center">
-          <VueApexCharts type="radialBar" height="350" :options="radialOptions" :series="radialSeries" />
+      <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 md:p-6 flex flex-col">
+        <div class="flex items-center justify-between mb-6">
+          <h3 class="text-base font-bold text-gray-800 flex items-center gap-2"><DocumentArrowUpIcon class="w-5 h-5 text-blue-500"/> Thống kê Xuất Kho (Phiếu)</h3>
+        </div>
+        <div class="flex-1 min-h-[200px] flex items-center justify-center bg-gray-50 rounded-lg border border-dashed border-gray-200">
+           <span class="text-gray-400 text-sm font-medium">Chưa có dữ liệu Xuất kho</span>
         </div>
       </div>
     </div>
 
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      
+      <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 md:p-6 flex flex-col items-center">
+        <h3 class="text-base font-bold text-gray-800 mb-6 flex items-center gap-2 w-full justify-start"><ChartPieIcon class="w-5 h-5 text-gray-500"/> Cơ cấu Nhóm hàng Tồn</h3>
+        <div class="relative w-48 h-48 rounded-full flex items-center justify-center shadow-inner bg-gray-100 border border-gray-200">
+          <div class="w-32 h-32 bg-white rounded-full absolute flex flex-col items-center justify-center shadow-sm">
+            <span class="text-xs font-semibold text-gray-400 uppercase tracking-widest">Tổng SKU</span>
+            <span class="text-2xl font-black text-gray-300">0</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 md:p-6">
+        <h3 class="text-base font-bold text-gray-800 mb-6 flex items-center gap-2"><BuildingStorefrontIcon class="w-5 h-5 text-gray-500"/> Tỉ lệ Lấp đầy Kho</h3>
+        <div class="flex h-48 items-center justify-center">
+          <span class="text-gray-400 text-sm font-medium italic">Chưa thiết lập vị trí kho</span>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 md:p-6 flex flex-col">
+        <h3 class="text-base font-bold text-gray-800 mb-6 flex items-center gap-2"><ChartBarIcon class="w-5 h-5 text-gray-500 transform rotate-90"/> Top Xuất Kho</h3>
+        <div class="flex h-48 items-center justify-center">
+          <span class="text-gray-400 text-sm font-medium italic">Chưa có giao dịch xuất hàng</span>
+        </div>
+      </div>
+
+    </div>
   </div>
 </template>

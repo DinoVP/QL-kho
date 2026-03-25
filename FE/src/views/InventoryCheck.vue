@@ -1,61 +1,160 @@
 <script setup>
-import { ref } from 'vue'
-import { MagnifyingGlassIcon, PlusIcon, ClipboardDocumentCheckIcon } from '@heroicons/vue/24/outline'
+import { ref, computed } from 'vue'
+import { 
+  MagnifyingGlassIcon, PlusIcon, EyeIcon, 
+  XMarkIcon, ClipboardDocumentCheckIcon, TrashIcon, PencilSquareIcon
+} from '@heroicons/vue/24/outline'
 
-const inventoryChecks = ref([]) 
+// === 1. STATE CHÍNH: TRỐNG CHỜ API ===
+const inventoryChecks = ref([])
+
+// === 2. MOCK DATA BỔ TRỢ: TRỐNG CHỜ API ===
+const mockWarehouses = ref([])
+const mockProducts = ref([])
+
+// === 3. BỘ LỌC ===
+const searchQuery = ref('')
+const filterStatus = ref('')
+
+const filteredChecks = computed(() => {
+  return inventoryChecks.value.filter(c => {
+    const matchSearch = c.code.toLowerCase().includes(searchQuery.value.toLowerCase()) || 
+                        (c.warehouseName && c.warehouseName.toLowerCase().includes(searchQuery.value.toLowerCase()))
+    const matchStatus = filterStatus.value === '' || c.status === filterStatus.value
+    return matchSearch && matchStatus
+  }).sort((a, b) => b.id - a.id)
+})
+
+// === 4. LOGIC MODAL TẠO / SỬA PHIẾU KIỂM KÊ ===
+const showModal = ref(false)
+const modalMode = ref('add') 
+
+const formData = ref({ 
+  id: null, code: '', date: '', warehouseId: '', 
+  items: [], note: '', status: 'draft' 
+})
+
+const generateCode = () => `KK-${new Date().getFullYear().toString().slice(2)}${(new Date().getMonth() + 1).toString().padStart(2, '0')}-${(inventoryChecks.value.length + 1).toString().padStart(3, '0')}`
+const getToday = () => new Date().toISOString().split('T')[0]
+
+const openModal = (mode, check = null) => {
+  modalMode.value = mode
+  if (check) {
+    formData.value = JSON.parse(JSON.stringify(check)) 
+  } else {
+    formData.value = { id: null, code: '', date: getToday(), warehouseId: '', items: [], note: '', status: 'draft' }
+  }
+  showModal.value = true
+}
+const closeModal = () => showModal.value = false
+
+const getStatusBadge = (status) => {
+  switch(status) {
+    case 'draft': return { text: 'Bản nháp', class: 'bg-gray-100 text-gray-700' }
+    case 'checking': return { text: 'Đang kiểm kê', class: 'bg-blue-100 text-blue-700 border-blue-200' }
+    case 'completed': return { text: 'Đã chốt sổ', class: 'bg-teal-100 text-teal-700 border-teal-200' }
+    default: return { text: 'Khác', class: 'bg-gray-100 text-gray-500' }
+  }
+}
+
+// === 5. LOGIC CHỌN HÀNG & TÍNH CHÊNH LỆCH ===
+const selectedSkuToAdd = ref('')
+
+const handleAddItem = () => {
+  if (!selectedSkuToAdd.value) return
+  const existingItem = formData.value.items.find(i => i.sku === selectedSkuToAdd.value)
+  if (!existingItem) {
+    const prod = mockProducts.value.find(p => p.sku === selectedSkuToAdd.value)
+    if (prod) {
+      formData.value.items.push({ 
+        sku: prod.sku, name: prod.name, unit: prod.unit, 
+        systemQty: prod.systemQty, actualQty: prod.systemQty, 
+        diff: 0, reason: '' 
+      })
+    }
+  }
+  selectedSkuToAdd.value = '' 
+}
+
+const removeItem = (index) => formData.value.items.splice(index, 1)
+
+const updateDiff = (item) => {
+  item.diff = item.actualQty - item.systemQty
+}
+
+const handleSubmit = () => {
+  if (!formData.value.warehouseId) return alert('Vui lòng chọn Kho kiểm kê!')
+  if (formData.value.items.length === 0) return alert('Chưa chọn mặt hàng nào để kiểm kê!')
+  
+  if (modalMode.value === 'add') {
+    inventoryChecks.value.push({
+      ...formData.value, id: Date.now(), code: generateCode(),
+      warehouseName: mockWarehouses.value.find(w => w.id === formData.value.warehouseId)?.name || 'Chưa rõ'
+    })
+    alert('Tạo Phiếu Kiểm Kê thành công!')
+  } else {
+    const idx = inventoryChecks.value.findIndex(c => c.id === formData.value.id)
+    if (idx !== -1) {
+      inventoryChecks.value[idx] = { ...formData.value }
+      alert('Cập nhật Phiếu Kiểm Kê thành công!')
+    }
+  }
+  closeModal()
+}
 </script>
 
 <template>
-  <div class="space-y-5 md:space-y-6 animate-fade-in pb-10 px-0 md:px-1">
-    
+  <div class="space-y-5 md:space-y-6 animate-fade-in pb-10 px-0 md:px-1 relative">
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
       <div>
-        <h2 class="text-xl md:text-2xl font-bold text-gray-800">Kiểm kê Kho</h2>
-        <p class="text-xs md:text-sm text-gray-500 mt-1">Đảm bảo số lượng tồn thực tế khớp với hệ thống</p>
+        <h2 class="text-xl md:text-2xl font-bold text-gray-800">Kiểm Kê Kho (Stocktake)</h2>
+        <p class="text-xs md:text-sm text-gray-500 mt-1">Đối chiếu số lượng phần mềm với hàng tồn thực tế tại kho</p>
       </div>
-      <button class="bg-primary-600 hover:bg-primary-700 text-white px-4 py-2.5 rounded-lg flex items-center gap-2 text-sm font-semibold shadow-sm transition-colors active:scale-95 justify-center">
-        <PlusIcon class="w-5 h-5" /> Tạo Phiếu Kiểm Kê
+      <button @click="openModal('add')" class="bg-teal-600 hover:bg-teal-700 text-white px-4 py-2.5 rounded-lg flex items-center gap-2 text-sm font-semibold shadow-sm">
+        <PlusIcon class="w-5 h-5" /> Lập Phiếu Kiểm Kê
       </button>
     </div>
 
     <div class="bg-white p-3 md:p-4 rounded-xl border border-gray-200 flex flex-col sm:flex-row items-center gap-3 md:gap-4 shadow-sm">
-      <div class="relative w-full sm:flex-1 max-w-none sm:max-w-md">
-        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-          <MagnifyingGlassIcon class="w-5 h-5 text-gray-400" />
-        </div>
-        <input type="text" class="block w-full pl-10 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-1 focus:ring-primary-500 outline-none" placeholder="Tìm mã phiếu kiểm kê...">
+      <div class="relative w-full sm:flex-1">
+        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><MagnifyingGlassIcon class="w-5 h-5 text-gray-400" /></div>
+        <input v-model="searchQuery" type="text" class="block w-full pl-10 pr-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-1 focus:ring-teal-500" placeholder="Tìm theo mã phiếu, tên kho kiểm kê...">
       </div>
-      <select class="w-full sm:w-auto border border-gray-200 rounded-lg text-sm px-4 py-2 text-gray-600 outline-none focus:ring-1 focus:ring-primary-500 cursor-pointer">
-        <option value="">Tất cả kho</option>
-        <option value="kho1">Kho Tổng (Hà Nội)</option>
-        <option value="kho2">Kho Chi nhánh (HCM)</option>
+      <select v-model="filterStatus" class="w-full sm:w-auto border border-gray-200 rounded-lg text-sm px-4 py-2 outline-none focus:ring-1 focus:ring-teal-500 cursor-pointer">
+        <option value="">Tất cả Trạng thái</option>
+        <option value="draft">Bản nháp</option><option value="checking">Đang kiểm kê</option><option value="completed">Đã chốt sổ</option>
       </select>
     </div>
 
     <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
       <div class="w-full overflow-x-auto custom-scrollbar">
-        <table class="min-w-[900px] w-full divide-y divide-gray-200">
+        <table class="min-w-[1000px] w-full divide-y divide-gray-200">
           <thead class="bg-gray-50">
             <tr>
-              <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase">Mã Kiểm kê</th>
-              <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase">Ngày tạo</th>
-              <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase">Kho kiểm kê</th>
-              <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase">Người phụ trách</th>
-              <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase">SL Lệch</th>
-              <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase">Trạng thái</th>
-              <th class="px-5 py-3.5 text-right text-xs font-bold text-gray-500 uppercase">Thao tác</th>
+              <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Mã Phiếu</th>
+              <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Ngày kiểm</th>
+              <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Kho được kiểm kê</th>
+              <th class="px-5 py-3.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Số mặt hàng</th>
+              <th class="px-5 py-3.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Trạng thái</th>
+              <th class="px-5 py-3.5 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">Thao tác</th>
             </tr>
           </thead>
-          <tbody>
-            <tr>
-              <td colspan="7" class="px-6 py-16 md:py-24 text-center">
-                <div class="flex flex-col items-center justify-center">
-                  <div class="bg-gray-50 p-4 rounded-full mb-4 shadow-inner">
-                    <ClipboardDocumentCheckIcon class="w-10 h-10 md:w-12 md:h-12 text-teal-600" />
-                  </div>
-                  <h3 class="text-sm md:text-base font-semibold text-gray-900">Chưa có Phiếu Kiểm Kê</h3>
-                  <p class="text-xs md:text-sm text-gray-500 mt-2 max-w-sm mx-auto">Thường xuyên kiểm kê để tránh thất thoát hàng hóa.</p>
-                </div>
+          <tbody class="divide-y divide-gray-100 bg-white">
+            <tr v-if="filteredChecks.length === 0">
+              <td colspan="6" class="px-6 py-16 text-center">
+                <ClipboardDocumentCheckIcon class="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                <h3 class="text-base font-semibold text-gray-700">Chưa có Phiếu Kiểm Kê nào</h3>
+              </td>
+            </tr>
+            <tr v-for="check in filteredChecks" :key="check.id" class="hover:bg-gray-50">
+              <td class="px-5 py-3 text-sm font-bold text-teal-700">{{ check.code }}</td>
+              <td class="px-5 py-3 text-sm font-medium text-gray-600">{{ check.date }}</td>
+              <td class="px-5 py-3 text-sm font-bold text-gray-800">{{ check.warehouseName }}</td>
+              <td class="px-5 py-3 text-sm text-center font-bold text-gray-900">{{ check.items.length }} SKU</td>
+              <td class="px-5 py-3 text-center"><span :class="['text-[10px] font-bold px-2 py-1 rounded border uppercase tracking-wider', getStatusBadge(check.status).class]">{{ getStatusBadge(check.status).text }}</span></td>
+              <td class="px-5 py-3 text-right space-x-2 whitespace-nowrap">
+                <button v-if="check.status !== 'completed'" @click="openModal('edit', check)" class="p-1.5 text-amber-600 hover:bg-amber-50 rounded" title="Sửa/Tiếp tục kiểm"><PencilSquareIcon class="w-5 h-5" /></button>
+                <button @click="openModal('view', check)" class="p-1.5 text-teal-600 hover:bg-teal-50 rounded" title="Chi tiết"><EyeIcon class="w-5 h-5" /></button>
               </td>
             </tr>
           </tbody>
@@ -63,12 +162,83 @@ const inventoryChecks = ref([])
       </div>
     </div>
 
+    <Teleport to="body">
+      <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center px-4 bg-slate-900/50 backdrop-blur-sm animate-fade-in">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-5xl overflow-hidden flex flex-col max-h-[90vh]">
+          <div class="px-6 py-4 border-b border-teal-100 flex items-center justify-between bg-teal-50 shrink-0">
+            <h3 class="text-lg font-bold text-teal-800 flex items-center gap-2"><ClipboardDocumentCheckIcon class="w-6 h-6 text-teal-600"/> {{ modalMode === 'add' ? 'Lập Phiếu Kiểm Kê' : `Chi tiết Phiếu: ${formData.code}` }}</h3>
+            <button @click="closeModal" class="text-gray-400 hover:text-red-500"><XMarkIcon class="w-6 h-6" /></button>
+          </div>
+          <div class="p-6 overflow-y-auto flex-1 custom-scrollbar">
+            <form id="checkForm" @submit.prevent="handleSubmit" class="space-y-6">
+              <div class="bg-slate-50 p-4 rounded-lg border border-slate-200">
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div><label class="block text-xs font-bold mb-1">Mã Phiếu</label><input type="text" disabled class="w-full border rounded-lg px-3 py-2 text-sm bg-gray-100 italic" :placeholder="modalMode === 'add' ? 'Hệ thống tự sinh' : formData.code"></div>
+                  <div><label class="block text-xs font-bold mb-1">Ngày kiểm kê *</label><input v-model="formData.date" :disabled="modalMode === 'view'" type="date" required class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-teal-500 disabled:bg-gray-100"></div>
+                  <div class="md:col-span-2"><label class="block text-xs font-bold mb-1">Kho kiểm kê *</label>
+                    <select v-model="formData.warehouseId" :disabled="modalMode === 'view' || modalMode === 'edit'" required class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-teal-500 disabled:bg-gray-100 cursor-pointer">
+                      <option value="" disabled>-- Chọn Kho --</option>
+                      <option v-for="wh in mockWarehouses" :key="wh.id" :value="wh.id">{{ wh.name }}</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <div class="flex items-center justify-between mb-2">
+                  <h4 class="text-sm font-bold">Danh sách Hàng hóa Kiểm đếm</h4>
+                  <div class="text-sm font-bold">Trạng thái Phiếu: 
+                    <select v-model="formData.status" :disabled="modalMode === 'view'" class="ml-2 border rounded px-2 py-1 text-sm font-bold text-teal-700 bg-white cursor-pointer focus:ring-teal-500 disabled:bg-gray-100">
+                      <option value="draft">Bản nháp</option><option value="checking">Đang kiểm kê</option><option value="completed">Đã chốt sổ</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div v-if="modalMode !== 'view'" class="flex flex-col sm:flex-row gap-2 mb-3 bg-teal-50 p-3 rounded-lg border border-teal-100">
+                  <select v-model="selectedSkuToAdd" class="flex-1 border rounded-lg px-3 py-2 text-sm focus:ring-teal-500 cursor-pointer">
+                    <option value="" disabled>-- Chọn Sản phẩm --</option>
+                    <option v-for="prod in mockProducts" :key="prod.sku" :value="prod.sku">{{ prod.sku }} - {{ prod.name }}</option>
+                  </select>
+                  <button type="button" @click="handleAddItem" :disabled="!selectedSkuToAdd" class="bg-teal-600 hover:bg-teal-700 text-white px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-50">Đưa vào Lưới</button>
+                </div>
+
+                <div class="border rounded-lg overflow-x-auto">
+                  <table class="w-full text-sm text-left">
+                    <thead class="bg-gray-50 text-xs uppercase font-bold text-gray-500">
+                      <tr><th class="px-4 py-3">Mã SKU</th><th class="px-4 py-3">Tên Hàng</th><th class="px-4 py-3 text-center">Tồn Hệ Thống</th><th class="px-4 py-3 text-center w-32">Tồn Thực Tế</th><th class="px-4 py-3 text-center">Chênh lệch</th><th class="px-4 py-3 text-left w-1/4">Ghi chú / Lý do</th><th v-if="modalMode !== 'view'" class="px-4 py-3 text-center w-10">#</th></tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-100">
+                      <tr v-if="formData.items.length === 0"><td :colspan="modalMode !== 'view' ? 7 : 6" class="px-4 py-8 text-center text-gray-400 italic">Chưa có mặt hàng nào.</td></tr>
+                      <tr v-for="(item, idx) in formData.items" :key="idx" class="hover:bg-gray-50">
+                        <td class="px-4 py-3 font-bold">{{ item.sku }}</td><td class="px-4 py-3">{{ item.name }}</td><td class="px-4 py-3 text-center font-bold bg-gray-100">{{ item.systemQty }} {{ item.unit }}</td>
+                        <td class="px-4 py-3 text-center"><input v-if="modalMode !== 'view'" v-model.number="item.actualQty" @input="updateDiff(item)" type="number" min="0" class="w-full text-center border rounded px-2 py-1.5 font-bold text-teal-700"><span v-else class="font-bold text-teal-700">{{ item.actualQty }} {{ item.unit }}</span></td>
+                        <td class="px-4 py-3 text-center font-bold">
+                          <span v-if="item.diff === 0" class="text-emerald-600 bg-emerald-50 px-2 py-1 rounded">Khớp (0)</span>
+                          <span v-else-if="item.diff > 0" class="text-amber-600 bg-amber-50 px-2 py-1 rounded">Thừa (+{{ item.diff }})</span>
+                          <span v-else class="text-red-600 bg-red-50 px-2 py-1 rounded">Thiếu ({{ item.diff }})</span>
+                        </td>
+                        <td class="px-4 py-3"><input v-if="modalMode !== 'view'" v-model="item.reason" type="text" class="w-full border rounded px-2 py-1.5 text-xs"><span v-else class="text-xs">{{ item.reason || '—' }}</span></td>
+                        <td v-if="modalMode !== 'view'" class="px-4 py-3 text-center"><button type="button" @click="removeItem(idx)" class="text-red-400 hover:text-red-600"><TrashIcon class="w-5 h-5 mx-auto"/></button></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <div><label class="block text-xs font-bold mb-1">Ghi chú tổng thể</label><textarea v-model="formData.note" :disabled="modalMode === 'view'" rows="2" class="w-full border rounded-lg px-3 py-2 text-sm disabled:bg-gray-100" placeholder="..."></textarea></div>
+            </form>
+          </div>
+          <div class="px-6 py-4 border-t flex justify-end gap-3 bg-white shrink-0">
+            <button type="button" @click="closeModal" class="px-5 py-2.5 border rounded-lg text-sm font-semibold hover:bg-gray-50">{{ modalMode === 'view' ? 'Đóng' : 'Hủy bỏ' }}</button>
+            <button v-if="modalMode !== 'view'" type="submit" form="checkForm" class="px-5 py-2.5 bg-teal-600 text-white rounded-lg text-sm font-bold hover:bg-teal-700 shadow-md flex items-center gap-2"><ClipboardDocumentCheckIcon class="w-5 h-5"/> Lưu Phiếu</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <style scoped>
-.custom-scrollbar::-webkit-scrollbar { height: 6px; }
+.custom-scrollbar::-webkit-scrollbar { height: 6px; width: 6px; }
 .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-.custom-scrollbar::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
-.custom-scrollbar:hover::-webkit-scrollbar-thumb { background: #cbd5e1; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
 </style>
