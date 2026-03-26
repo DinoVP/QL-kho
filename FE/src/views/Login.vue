@@ -73,7 +73,7 @@ import { CubeIcon, LockClosedIcon, UserIcon } from "@heroicons/vue/24/outline";
 
         <button
           type="button"
-          @click="$router.push('/Trang-Chu')"
+          @click="$router.push('/home')"
           class="w-full bg-primary-600 hover:bg-primary-700 text-white py-2.5 rounded-lg text-sm font-bold tracking-wide transition-colors shadow-sm"
         >
           ĐĂNG NHẬP
