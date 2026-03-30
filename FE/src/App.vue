@@ -7,14 +7,34 @@ import {
   BellIcon,
   ArrowRightOnRectangleIcon,
 } from "@heroicons/vue/24/outline";
+import { useAuth } from "./composables/useAuth"; // Gọi đồ nghề lấy thông tin Đăng nhập
 
 const route = useRoute();
 const router = useRouter();
 
+// Rút dữ liệu từ hệ thống Auth ra
+const { currentUsername, currentUserRole, logout } = useAuth();
+
 const isLoginPage = computed(() => route.path === "/login");
 
+// Tự động dịch mã Role (lưu trong localStorage) sang Tiếng Việt hiển thị cho xịn
+const roleDisplayName = computed(() => {
+  switch (currentUserRole.value) {
+    case 'admin': return 'Quản trị viên';
+    case 'giam_doc': return 'Giám đốc công ty';
+    case 'gd_chi_nhanh': return 'GĐ Chi nhánh';
+    case 'ql_kho': return 'Quản lý kho';
+    case 'nv_kho': return 'Nhân viên kho';
+    default: return 'Khách viếng thăm';
+  }
+});
+
+// Xử lý nút Đăng xuất cực mượt
 const handleLogout = () => {
-  router.push("/login");
+  if (confirm("Sếp muốn đăng xuất khỏi hệ thống chứ?")) {
+    logout(); // Xóa sạch Token trong máy
+    router.push("/login"); // Đá văng về trang Login
+  }
 };
 </script>
 
@@ -53,8 +73,8 @@ const handleLogout = () => {
 
           <div class="flex items-center gap-2 md:gap-4 md:pl-6 border-l border-gray-200 pl-2">
             <div class="hidden md:block text-right text-sm">
-              <div class="font-bold text-gray-800">Admin</div>
-              <div class="text-gray-500 text-xs font-medium">Quản trị viên</div>
+              <div class="font-bold text-gray-800 capitalize">{{ currentUsername || 'Khách' }}</div>
+              <div class="text-gray-500 text-xs font-medium">{{ roleDisplayName }}</div>
             </div>
             
             <UserCircleIcon class="w-8 h-8 md:w-10 md:h-10 text-gray-400" />

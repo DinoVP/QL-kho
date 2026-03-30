@@ -1,59 +1,67 @@
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { useAuth } from '../composables/useAuth' 
 import { 
   HomeIcon, UserGroupIcon, BuildingOfficeIcon, ClipboardDocumentListIcon,
   ListBulletIcon, CubeIcon, Squares2X2Icon, IdentificationIcon,
   ArrowDownTrayIcon, ArrowUpTrayIcon, TruckIcon, ExclamationTriangleIcon, ShoppingCartIcon,
   ClipboardDocumentCheckIcon, ArchiveBoxIcon, DocumentTextIcon, BellAlertIcon, MapPinIcon,
-  ChartPieIcon, ChartBarIcon, Bars3Icon 
+  ChartPieIcon, ChartBarIcon, Bars3Icon, ComputerDesktopIcon,
+  CheckBadgeIcon // Icon mới cho chức năng Duyệt phiếu
 } from '@heroicons/vue/24/outline'
 
 const router = useRouter()
 const route = useRoute()
+const { currentUserRole } = useAuth()
 
-// Tự động thu gọn trên màn hình nhỏ (iPad/Mobile)
 const isCollapsed = ref(window.innerWidth < 1024)
-
-const handleResize = () => {
-  isCollapsed.value = window.innerWidth < 1024
-}
-
+const handleResize = () => { isCollapsed.value = window.innerWidth < 1024 }
 onMounted(() => window.addEventListener('resize', handleResize))
 onUnmounted(() => window.removeEventListener('resize', handleResize))
 
-// Đã đổi TOÀN BỘ path sang tiếng Anh khớp với file Router
+// ĐÃ CẬP NHẬT: Thêm Duyệt phiếu tổng, Rút quyền GĐ/GĐCN khỏi các menu lắt nhắt
 const menuItems = [
-  { name: 'Trang chủ', path: '/home', icon: HomeIcon },
-  { name: 'Nhân sự & Phân quyền', path: '/employees', icon: UserGroupIcon },
-  { name: 'Chi nhánh & Kho', path: '/branches', icon: BuildingOfficeIcon },
-  { name: 'Nhật ký hệ thống', path: '/audit-logs', icon: ClipboardDocumentListIcon },
+  { name: 'Trang chủ', path: '/home', icon: HomeIcon, roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho', 'nv_kho'] },
   
-  { name: 'Danh mục chung', path: '/categories', icon: ListBulletIcon },
-  { name: 'Sản phẩm (SKU)', path: '/products', icon: CubeIcon },
-  { name: 'Sơ đồ kho', path: '/warehouse-map', icon: Squares2X2Icon },
-  { name: 'Đối tác (KH/NCC)', path: '/partners', icon: IdentificationIcon },
+  // Nhóm A
+  { name: 'Nhân sự & Phân quyền', path: '/employees', icon: UserGroupIcon, roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho'] },
+  { name: 'Chi nhánh & Kho', path: '/branches', icon: BuildingOfficeIcon, roles: ['admin', 'giam_doc', 'gd_chi_nhanh'] },
+  { name: 'Nhật ký hệ thống', path: '/audit-logs', icon: ClipboardDocumentListIcon, roles: ['admin'] },
   
-  { name: 'Phiếu Nhập', path: '/inbound', icon: ArrowDownTrayIcon },
-  { name: 'Phiếu Xuất', path: '/outbound', icon: ArrowUpTrayIcon },
-  { name: 'Điều chuyển', path: '/transfer', icon: TruckIcon },
-  { name: 'Hàng lỗi', path: '/defects', icon: ExclamationTriangleIcon },
-  { name: 'Đặt hàng PO', path: '/purchase-orders', icon: ShoppingCartIcon },
-  { name: 'Kiểm kê', path: '/inventory-check', icon: ClipboardDocumentCheckIcon },
+  // Nhóm B
+  { name: 'Danh mục chung', path: '/categories', icon: ListBulletIcon, roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho'] },
+  { name: 'Sản phẩm (SKU)', path: '/products', icon: CubeIcon, roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho'] },
+  { name: 'Sơ đồ kho', path: '/warehouse-map', icon: Squares2X2Icon, roles: ['admin', 'ql_kho'] },
+  { name: 'Đối tác (KH/NCC)', path: '/partners', icon: IdentificationIcon, roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho'] },
   
-  { name: 'Tra cứu Tồn kho', path: '/stock', icon: ArchiveBoxIcon },
-  { name: 'Sổ giao dịch', path: '/transactions', icon: DocumentTextIcon },
-  { name: 'Cảnh báo tồn kho', path: '/alerts', icon: BellAlertIcon },
-  { name: 'Vị trí lưu kho', path: '/locations', icon: MapPinIcon },
+  // Nhóm C
+  { name: 'Duyệt phiếu tổng', path: '/approvals', icon: CheckBadgeIcon, roles: ['admin', 'giam_doc', 'gd_chi_nhanh'] }, // Tính năng mới cho Sếp
+  { name: 'Phiếu Nhập', path: '/inbound', icon: ArrowDownTrayIcon, roles: ['admin', 'ql_kho'] }, // Đã giấu khỏi mắt GĐ, GĐCN
+  { name: 'Phiếu Xuất', path: '/outbound', icon: ArrowUpTrayIcon, roles: ['admin', 'ql_kho'] }, // Đã giấu khỏi mắt GĐ, GĐCN
+  { name: 'Điều chuyển', path: '/transfer', icon: TruckIcon, roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho'] },
+  { name: 'Hàng lỗi', path: '/defects', icon: ExclamationTriangleIcon, roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho', 'nv_kho'] },
+  { name: 'Đặt hàng PO', path: '/purchase-orders', icon: ShoppingCartIcon, roles: ['admin', 'giam_doc', 'ql_kho'] },
+  { name: 'Kiểm kê', path: '/inventory-check', icon: ClipboardDocumentCheckIcon, roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho'] },
   
-  { name: 'Dashboard (Biểu đồ)', path: '/dashboard', icon: ChartPieIcon },
-  { name: 'Báo cáo Xuất/Nhập', path: '/reports', icon: ChartBarIcon },
+  // Nhóm D
+  { name: 'Tra cứu Tồn kho', path: '/stock', icon: ArchiveBoxIcon, roles: ['admin', 'ql_kho', 'nv_kho'] }, // Đã giấu khỏi GĐ, GĐCN
+  { name: 'Sổ giao dịch', path: '/transactions', icon: DocumentTextIcon, roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho'] },
+  { name: 'Cảnh báo tồn kho', path: '/alerts', icon: BellAlertIcon, roles: ['admin', 'ql_kho'] }, // Đã giấu khỏi GĐ, GĐCN
+  { name: 'Vị trí lưu kho', path: '/locations', icon: MapPinIcon, roles: ['admin', 'ql_kho', 'nv_kho'] }, // Đã giấu khỏi GĐ, GĐCN
+  
+  // Nhóm E
+  { name: 'Dashboard (Biểu đồ)', path: '/dashboard', icon: ChartPieIcon, roles: ['admin', 'giam_doc', 'gd_chi_nhanh'] },
+  { name: 'Báo cáo Xuất/Nhập', path: '/reports', icon: ChartBarIcon, roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho'] },
+  { name: 'Nhật ký UI', path: '/ui-logs', icon: ComputerDesktopIcon, roles: ['admin'] }
 ]
 
-// Hàm chuyển trang
-const goTo = (path) => {
-  router.push(path)
-}
+const filteredMenuItems = computed(() => {
+  if (!currentUserRole.value) return [] 
+  return menuItems.filter(item => item.roles.includes(currentUserRole.value))
+})
+
+const goTo = (path) => { router.push(path) }
 </script>
 
 <template>
@@ -61,7 +69,6 @@ const goTo = (path) => {
     class="bg-sidebar-bg text-sidebar-text flex flex-col h-screen border-r border-primary-800 shrink-0 transition-all duration-300 ease-in-out relative z-20 shadow-xl" 
     :class="isCollapsed ? 'w-20' : 'w-72'"
   >
-    
     <div class="h-16 flex items-center border-b border-primary-800 px-4" :class="isCollapsed ? 'justify-center' : 'justify-between'">
       <div v-if="!isCollapsed" class="flex items-center gap-2 overflow-hidden whitespace-nowrap cursor-pointer hover:opacity-80" @click="goTo('/home')">
         <CubeIcon class="w-8 h-8 text-primary-200 shrink-0" />
@@ -74,7 +81,7 @@ const goTo = (path) => {
 
     <nav class="flex-1 overflow-y-auto py-4 space-y-1 overflow-x-hidden custom-scrollbar">
       <button 
-        v-for="item in menuItems" :key="item.name"
+        v-for="item in filteredMenuItems" :key="item.name"
         @click="goTo(item.path)"
         :title="isCollapsed ? item.name : ''"
         :class="[
