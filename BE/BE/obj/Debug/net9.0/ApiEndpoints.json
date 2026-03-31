@@ -1,5 +1,15 @@
 [
   {
+    "ContainingType": "BE.Controllers.AuditLogsController",
+    "Method": "GetLogs",
+    "RelativePath": "api/AuditLogs",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
     "ContainingType": "BE.Controllers.AuthController",
     "Method": "Login",
     "RelativePath": "api/Auth/login",

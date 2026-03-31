@@ -20,7 +20,7 @@ const handleResize = () => { isCollapsed.value = window.innerWidth < 1024 }
 onMounted(() => window.addEventListener('resize', handleResize))
 onUnmounted(() => window.removeEventListener('resize', handleResize))
 
-// ĐÃ CẬP NHẬT: Thêm Duyệt phiếu tổng, Rút quyền GĐ/GĐCN khỏi các menu lắt nhắt
+// ĐÃ CẬP NHẬT: Thêm Duyệt phiếu tổng, Nhật ký UI, Rút quyền GĐ/GĐCN khỏi các menu lắt nhắt
 const menuItems = [
   { name: 'Trang chủ', path: '/home', icon: HomeIcon, roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho', 'nv_kho'] },
   
@@ -37,18 +37,18 @@ const menuItems = [
   
   // Nhóm C
   { name: 'Duyệt phiếu tổng', path: '/approvals', icon: CheckBadgeIcon, roles: ['admin', 'giam_doc', 'gd_chi_nhanh'] }, // Tính năng mới cho Sếp
-  { name: 'Phiếu Nhập', path: '/inbound', icon: ArrowDownTrayIcon, roles: ['admin', 'ql_kho'] }, // Đã giấu khỏi mắt GĐ, GĐCN
-  { name: 'Phiếu Xuất', path: '/outbound', icon: ArrowUpTrayIcon, roles: ['admin', 'ql_kho'] }, // Đã giấu khỏi mắt GĐ, GĐCN
+  { name: 'Phiếu Nhập', path: '/inbound', icon: ArrowDownTrayIcon, roles: ['admin', 'ql_kho'] }, 
+  { name: 'Phiếu Xuất', path: '/outbound', icon: ArrowUpTrayIcon, roles: ['admin', 'ql_kho'] }, 
   { name: 'Điều chuyển', path: '/transfer', icon: TruckIcon, roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho'] },
   { name: 'Hàng lỗi', path: '/defects', icon: ExclamationTriangleIcon, roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho', 'nv_kho'] },
   { name: 'Đặt hàng PO', path: '/purchase-orders', icon: ShoppingCartIcon, roles: ['admin', 'giam_doc', 'ql_kho'] },
   { name: 'Kiểm kê', path: '/inventory-check', icon: ClipboardDocumentCheckIcon, roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho'] },
   
   // Nhóm D
-  { name: 'Tra cứu Tồn kho', path: '/stock', icon: ArchiveBoxIcon, roles: ['admin', 'ql_kho', 'nv_kho'] }, // Đã giấu khỏi GĐ, GĐCN
+  { name: 'Tra cứu Tồn kho', path: '/stock', icon: ArchiveBoxIcon, roles: ['admin', 'ql_kho', 'nv_kho'] }, 
   { name: 'Sổ giao dịch', path: '/transactions', icon: DocumentTextIcon, roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho'] },
-  { name: 'Cảnh báo tồn kho', path: '/alerts', icon: BellAlertIcon, roles: ['admin', 'ql_kho'] }, // Đã giấu khỏi GĐ, GĐCN
-  { name: 'Vị trí lưu kho', path: '/locations', icon: MapPinIcon, roles: ['admin', 'ql_kho', 'nv_kho'] }, // Đã giấu khỏi GĐ, GĐCN
+  { name: 'Cảnh báo tồn kho', path: '/alerts', icon: BellAlertIcon, roles: ['admin', 'ql_kho'] }, 
+  { name: 'Vị trí lưu kho', path: '/locations', icon: MapPinIcon, roles: ['admin', 'ql_kho', 'nv_kho'] }, 
   
   // Nhóm E
   { name: 'Dashboard (Biểu đồ)', path: '/dashboard', icon: ChartPieIcon, roles: ['admin', 'giam_doc', 'gd_chi_nhanh'] },
@@ -74,7 +74,7 @@ const goTo = (path) => { router.push(path) }
         <CubeIcon class="w-8 h-8 text-primary-200 shrink-0" />
         <span class="text-2xl font-bold text-white tracking-wider">QL KHO</span>
       </div>
-      <button @click="isCollapsed = !isCollapsed" class="p-2 rounded-lg hover:bg-primary-800 text-primary-200 transition-colors" title="Thu gọn / Mở rộng">
+      <button @click="isCollapsed = !isCollapsed" class="p-2 rounded-lg hover:bg-primary-800 text-primary-200 transition-colors outline-none" title="Thu gọn / Mở rộng">
         <Bars3Icon class="w-6 h-6" />
       </button>
     </div>
@@ -85,7 +85,7 @@ const goTo = (path) => { router.push(path) }
         @click="goTo(item.path)"
         :title="isCollapsed ? item.name : ''"
         :class="[
-          'w-full flex items-center transition-colors duration-200 cursor-pointer',
+          'w-full flex items-center transition-colors duration-200 cursor-pointer outline-none',
           isCollapsed ? 'justify-center py-3 px-2' : 'py-3 px-6',
           route.path === item.path 
             ? 'bg-primary-600 text-white border-l-4 border-white'

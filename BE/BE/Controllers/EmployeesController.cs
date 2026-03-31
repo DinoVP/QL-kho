@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using BE.Models;
+using System;
 
 namespace BE.Controllers
 {
@@ -10,6 +11,33 @@ namespace BE.Controllers
     {
         private readonly QLKhoContext _context;
         public EmployeesController(QLKhoContext context) { _context = context; }
+
+        // =========================================================================
+        // CAMERA AN NINH: DÙNG ĐỂ GHI LOG BÊN PHÂN HỆ NHÂN SỰ
+        // =========================================================================
+        private async Task WriteAuditLogAsync(string actionType, string tableName)
+        {
+            try
+            {
+                var log = new SysAuditLog
+                {
+                    UserId = null, // ĐÃ FIX: Tạm để null để né lỗi khóa ngoại (chờ làm xong module Login)
+                    ActionType = actionType,
+                    TableName = tableName,
+                    LogDate = DateTime.Now
+                };
+
+                // ĐÃ FIX: Dùng hàm Add chung của _context để không sợ sai tên DbSet
+                _context.Add(log);
+                await _context.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                // Đã mở khóa báo lỗi ra Console của Visual Studio để dễ debug
+                Console.WriteLine("==== LỖI GHI LOG: " + ex.InnerException?.Message ?? ex.Message);
+            }
+        }
+        // =========================================================================
 
         [HttpGet]
         public async Task<IActionResult> GetAllEmployees()
@@ -73,6 +101,10 @@ namespace BE.Controllers
                 }
 
                 await transaction.CommitAsync();
+
+                // 🟢 GHI LOG: THÊM MỚI NHÂN VIÊN
+                await WriteAuditLogAsync("INSERT", $"Nhân sự: {newCode} - {request.FullName}");
+
                 return Ok(new { message = $"Tạo thành công {newCode}" });
             }
             catch (Exception ex) { await transaction.RollbackAsync(); return BadRequest(new { message = ex.InnerException?.Message ?? ex.Message }); }
@@ -84,16 +116,22 @@ namespace BE.Controllers
             var emp = await _context.HrmEmployees.FindAsync(id);
             if (emp == null) return NotFound();
 
+            string empName = emp.FullName; // Lưu tên để ghi log
+
             var roleCode = await _context.Database.SqlQueryRaw<string>("SELECT r.RoleCode AS Value FROM SYS_Users u INNER JOIN SYS_UserRoles ur ON u.UserId = ur.UserId INNER JOIN SYS_Roles r ON ur.RoleId = r.RoleId WHERE u.EmployeeId = {0}", id).FirstOrDefaultAsync();
 
             if (roleCode == "gd_chi_nhanh" && emp.BranchId.HasValue)
             {
-                await _context.Database.ExecuteSqlRawAsync("UPDATE HRM_Branches SET ManagerId = NULL WHERE BranchId = {0} AND ManagerId = {1}", emp.BranchId.Value, id);
+                await _context.Database.ExecuteSqlRawAsync("UPDATE HRM_Branches SET ManagerId = NULL WHERE BranchId = {0}", emp.BranchId.Value);
             }
 
             emp.BranchId = null;
             emp.WarehouseId = null;
             await _context.SaveChangesAsync();
+
+            // 🟡 GHI LOG: GỠ VỊ TRÍ
+            await WriteAuditLogAsync("UPDATE", $"Nhân sự: Gỡ vị trí làm việc của {empName}");
+
             return Ok(new { message = "Đã gỡ nhân viên khỏi vị trí làm việc" });
         }
 
@@ -103,7 +141,7 @@ namespace BE.Controllers
             try
             {
                 var emp = await _context.HrmEmployees.FindAsync(id);
-                if (emp == null) return NotFound(new { message = "Không tìm thấy nhân viên này!" });
+                if (emp == null) return NotFound();
 
                 emp.BranchId = request.BranchId;
                 emp.WarehouseId = request.WarehouseId;
@@ -116,6 +154,9 @@ namespace BE.Controllers
                     await _context.Database.ExecuteSqlRawAsync("UPDATE HRM_Branches SET ManagerId = {0} WHERE BranchId = {1}", id, request.BranchId.Value);
                 }
 
+                // 🟡 GHI LOG: GÁN VỊ TRÍ
+                await WriteAuditLogAsync("UPDATE", $"Nhân sự: Gán vị trí mới cho {emp.FullName}");
+
                 return Ok(new { message = "Cập nhật vị trí làm việc thành công!" });
             }
             catch (Exception ex) { return BadRequest(new { message = "Lỗi hệ thống: " + ex.Message }); }
@@ -125,10 +166,16 @@ namespace BE.Controllers
         public async Task<IActionResult> ToggleStatus(int id)
         {
             var user = await _context.SysUsers.FirstOrDefaultAsync(u => u.EmployeeId == id);
-            if (user == null) return NotFound(new { message = "Không tìm thấy tài khoản" });
-
+            if (user == null) return NotFound();
             user.IsActive = !user.IsActive;
             await _context.SaveChangesAsync();
+
+            var empName = await _context.HrmEmployees.Where(e => e.EmployeeId == id).Select(e => e.FullName).FirstOrDefaultAsync();
+
+            // 🔴 GHI LOG: KHÓA / MỞ KHÓA TÀI KHOẢN
+            string statusStr = user.IsActive == true ? "Mở khóa" : "Khóa";
+            await WriteAuditLogAsync("UPDATE", $"Tài khoản: {statusStr} tài khoản của {empName}");
+
             return Ok(new { message = user.IsActive == true ? "Đã mở khóa tài khoản" : "Đã khóa tài khoản" });
         }
     }

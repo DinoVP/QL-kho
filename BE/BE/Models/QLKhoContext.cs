@@ -96,6 +96,10 @@ public partial class QLKhoContext : DbContext
     public virtual DbSet<SysModule> SysModules { get; set; }
     public virtual DbSet<SysRole> SysRoles { get; set; }
     public virtual DbSet<SysSetting> SysSettings { get; set; }
+
+    // --- ĐÃ THÊM BẢNG NHẬT KÝ UI VÀO ĐÂY ---
+    public virtual DbSet<SysUiLog> SysUiLogs { get; set; }
+
     public virtual DbSet<SysUser> SysUsers { get; set; }
     public virtual DbSet<WmsAdjustment> WmsAdjustments { get; set; }
     public virtual DbSet<WmsAdjustmentLine> WmsAdjustmentLines { get; set; }
@@ -1722,6 +1726,35 @@ public partial class QLKhoContext : DbContext
             entity.HasOne(d => d.UpdatedByNavigation).WithMany(p => p.SysSettings)
                 .HasForeignKey(d => d.UpdatedBy)
                 .HasConstraintName("FK__SYS_Setti__Updat__6EF57B66");
+        });
+
+        // --- CẤU HÌNH CHO BẢNG MỚI TẠO (SysUiLog) ---
+        modelBuilder.Entity<SysUiLog>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("PK_SYS_UiLogs");
+
+            entity.ToTable("SYS_UiLogs");
+
+            entity.Property(e => e.EventType)
+                .HasMaxLength(50)
+                .IsUnicode(false);
+
+            entity.Property(e => e.Path)
+                .HasMaxLength(255)
+                .IsUnicode(false);
+
+            entity.Property(e => e.UserName).HasMaxLength(100);
+            entity.Property(e => e.Message).HasMaxLength(500);
+
+            entity.Property(e => e.LogDate)
+                .HasDefaultValueSql("(getdate())")
+                .HasColumnType("datetime");
+
+            // Ràng buộc khóa ngoại với bảng SysUsers
+            entity.HasOne(d => d.SysUser)
+                .WithMany() // Giả định SysUser không cần 1 list các UiLog dội ngược lại
+                .HasForeignKey(d => d.UserId)
+                .HasConstraintName("FK__SYS_UiLog__UserID");
         });
 
         modelBuilder.Entity<SysUser>(entity =>

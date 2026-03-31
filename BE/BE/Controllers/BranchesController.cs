@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using BE.Models;
+using System;
 
 namespace BE.Controllers
 {
@@ -10,6 +11,34 @@ namespace BE.Controllers
     {
         private readonly QLKhoContext _context;
         public BranchesController(QLKhoContext context) { _context = context; }
+
+        // =========================================================================
+        // HÀM BÍ MẬT: CHUYÊN DÙNG ĐỂ GHI VẾT LOG (CAMERA AN NINH)
+        // =========================================================================
+        private async Task WriteAuditLogAsync(string actionType, string tableName)
+        {
+            try
+            {
+                var log = new SysAuditLog
+                {
+                    UserId = null, // ĐÃ FIX: Tạm để null để né lỗi khóa ngoại (chờ làm xong module Login)
+                    ActionType = actionType,
+                    TableName = tableName,
+                    LogDate = DateTime.Now
+                };
+
+                // ĐÃ FIX: Dùng hàm Add chung của _context để không sợ sai tên DbSet
+                _context.Add(log);
+                await _context.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                // Đã mở khóa báo lỗi ra Console của Visual Studio để dễ debug
+                Console.WriteLine("==== LỖI GHI LOG: " + ex.InnerException?.Message ?? ex.Message);
+            }
+        }
+        // =========================================================================
+
 
         [HttpGet("available-managers")]
         public async Task<IActionResult> GetAvailableManagers()
@@ -44,8 +73,6 @@ namespace BE.Controllers
                     WarehouseCount = b.WmsWarehouses.Count,
                     ManagerId = b.ManagerId,
                     ManagerName = b.Manager != null ? b.Manager.FullName : "",
-
-                    // TODO: Sau này nối bảng Tồn kho thì đếm ở đây
                     ItemCount = 0,
                     TotalQuantity = 0
                 }).ToListAsync();
@@ -87,13 +114,13 @@ namespace BE.Controllers
                 }
 
                 await transaction.CommitAsync();
+
+                // 🟢 GỌI CAMERA GHI LOG LẠI THAO TÁC THÊM CHI NHÁNH
+                await WriteAuditLogAsync("INSERT", $"Chi nhánh: {request.Name}");
+
                 return Ok(new { message = $"Đã tạo chi nhánh {newCode} thành công!" });
             }
-            catch (Exception ex)
-            {
-                await transaction.RollbackAsync();
-                return BadRequest(new { message = "Lỗi hệ thống: " + ex.Message });
-            }
+            catch (Exception ex) { await transaction.RollbackAsync(); return BadRequest(new { message = "Lỗi hệ thống: " + ex.Message }); }
         }
 
         [HttpPut("{id}")]
@@ -105,13 +132,8 @@ namespace BE.Controllers
                 var branch = await _context.HrmBranches.FindAsync(id);
                 if (branch == null) return NotFound(new { message = "Không tìm thấy chi nhánh này!" });
 
-                branch.BranchName = request.Name;
-                branch.Address = request.Address;
-                branch.Phone = request.Phone;
-                branch.Email = request.Email;
-                branch.ManagerId = request.ManagerId;
-                branch.IsActive = request.Status == "active";
-
+                branch.BranchName = request.Name; branch.Address = request.Address; branch.Phone = request.Phone;
+                branch.Email = request.Email; branch.ManagerId = request.ManagerId; branch.IsActive = request.Status == "active";
                 await _context.SaveChangesAsync();
 
                 await _context.Database.ExecuteSqlRawAsync("UPDATE HRM_Employees SET BranchId = NULL WHERE BranchId = {0} AND EmployeeId IN (SELECT u.EmployeeId FROM SYS_Users u INNER JOIN SYS_UserRoles ur ON u.UserId = ur.UserId INNER JOIN SYS_Roles r ON ur.RoleId = r.RoleId WHERE r.RoleCode = 'gd_chi_nhanh')", id);
@@ -122,18 +144,15 @@ namespace BE.Controllers
                 }
 
                 await transaction.CommitAsync();
+
+                // 🟡 GỌI CAMERA GHI LOG LẠI THAO TÁC CẬP NHẬT CHI NHÁNH
+                await WriteAuditLogAsync("UPDATE", $"Chi nhánh: {request.Name}");
+
                 return Ok(new { message = "Cập nhật chi nhánh thành công!" });
             }
-            catch (Exception ex)
-            {
-                await transaction.RollbackAsync();
-                return BadRequest(new { message = "Lỗi hệ thống: " + ex.Message });
-            }
+            catch (Exception ex) { await transaction.RollbackAsync(); return BadRequest(new { message = "Lỗi hệ thống: " + ex.Message }); }
         }
 
-        // =========================================================================
-        // ĐÃ FIX: HÀM XÓA CHI NHÁNH - Xử lý luôn cả Phòng ban đang tồn tại
-        // =========================================================================
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteBranch(int id)
         {
@@ -143,30 +162,27 @@ namespace BE.Controllers
                 var branch = await _context.HrmBranches.FindAsync(id);
                 if (branch == null) return NotFound(new { message = "Không tìm thấy chi nhánh!" });
 
+                string branchName = branch.BranchName; // Lưu lại tên để lát ghi log
+
                 var hasWarehouses = await _context.WmsWarehouses.AnyAsync(w => w.BranchId == id);
                 if (hasWarehouses) return BadRequest(new { message = "Sếp vui lòng xóa hết Kho trực thuộc trước khi xóa Chi nhánh nhé!" });
 
-                // 1. Tháo BranchId của toàn bộ nhân viên
                 await _context.Database.ExecuteSqlRawAsync("UPDATE HRM_Employees SET BranchId = NULL WHERE BranchId = {0}", id);
-
-                // 2. Xóa sạch Phòng Ban (Departments) thuộc Chi nhánh này để không vướng khóa ngoại
                 try
                 {
-                    // Tháo liên kết phòng ban của nhân viên trước
                     await _context.Database.ExecuteSqlRawAsync("UPDATE HRM_Employees SET DepartmentId = NULL WHERE DepartmentId IN (SELECT DepartmentId FROM HRM_Departments WHERE BranchId = {0})", id);
-                    // Xóa phòng ban đi vì sếp chốt không dùng
                     await _context.Database.ExecuteSqlRawAsync("DELETE FROM HRM_Departments WHERE BranchId = {0}", id);
                 }
-                catch
-                {
-                    // Bỏ qua nếu bảng không tồn tại hoặc lỗi
-                }
+                catch { }
 
-                // 3. Xóa chi nhánh
                 _context.HrmBranches.Remove(branch);
                 await _context.SaveChangesAsync();
 
                 await transaction.CommitAsync();
+
+                // 🔴 GỌI CAMERA GHI LOG LẠI THAO TÁC XÓA CHI NHÁNH
+                await WriteAuditLogAsync("DELETE", $"Chi nhánh: {branchName}");
+
                 return Ok(new { message = "Xóa chi nhánh thành công!" });
             }
             catch (Exception ex)
@@ -179,7 +195,6 @@ namespace BE.Controllers
         [HttpGet("{branchId}/warehouses-detail")]
         public async Task<IActionResult> GetBranchWarehousesDetail(int branchId)
         {
-            // Tạm thời gán ItemCount = 0, TotalQuantity = 0 chờ module Tồn kho
             var sql = @"
                 SELECT w.WarehouseId, ISNULL(w.Whname, 'Chưa đặt tên') AS Whname,
                     ISNULL(w.WhAddress, 'Chưa có địa chỉ') AS WhAddress,
@@ -213,6 +228,10 @@ namespace BE.Controllers
                 };
                 _context.WmsWarehouses.Add(newWh);
                 await _context.SaveChangesAsync();
+
+                // 🟢 GHI LOG THÊM KHO
+                await WriteAuditLogAsync("INSERT", $"Kho: {request.Name}");
+
                 return Ok(new { message = "Tạo Kho thành công!" });
             }
             catch (Exception ex) { return BadRequest(new { message = "Lỗi: " + ex.Message }); }
@@ -227,12 +246,18 @@ namespace BE.Controllers
                 var wh = await _context.WmsWarehouses.FindAsync(warehouseId);
                 if (wh == null) return NotFound(new { message = "Không tìm thấy kho!" });
 
+                string whName = wh.Whname;
+
                 await _context.Database.ExecuteSqlRawAsync("UPDATE HRM_Employees SET WarehouseId = NULL WHERE WarehouseId = {0}", warehouseId);
 
                 _context.WmsWarehouses.Remove(wh);
                 await _context.SaveChangesAsync();
 
                 await transaction.CommitAsync();
+
+                // 🔴 GHI LOG XÓA KHO
+                await WriteAuditLogAsync("DELETE", $"Kho: {whName}");
+
                 return Ok(new { message = "Xóa kho thành công! Nhân sự thuộc kho đã được tự động gỡ." });
             }
             catch (Exception ex)
@@ -248,6 +273,10 @@ namespace BE.Controllers
             try
             {
                 await _context.Database.ExecuteSqlRawAsync("UPDATE HRM_Employees SET WarehouseId = NULL WHERE WarehouseId = {0}", warehouseId);
+
+                // 🟡 GHI LOG GỠ TOÀN BỘ NHÂN SỰ
+                await WriteAuditLogAsync("UPDATE", $"Gỡ nhân sự khỏi Kho ID: {warehouseId}");
+
                 return Ok(new { message = "Đã gỡ TẤT CẢ nhân sự ra khỏi kho!" });
             }
             catch (Exception ex) { return BadRequest(new { message = "Lỗi hệ thống: " + ex.Message }); }

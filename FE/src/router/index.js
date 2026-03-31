@@ -23,6 +23,10 @@ import Locations from "../views/Locations.vue";
 import Dashboard from "../views/Dashboard.vue";
 import Reports from "../views/Reports.vue";
 
+// IMPORT THÊM FILE CHO CÁC MENU MỚI TRONG SIDEBAR
+import Approval from "../views/Approval.vue";
+import UiLog from "../views/UiLog.vue";
+
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
@@ -58,6 +62,10 @@ const router = createRouter({
     { path: "/locations", name: "locations", component: Locations },
     { path: "/dashboard", name: "dashboard", component: Dashboard },
     { path: "/reports", name: "reports", component: Reports },
+
+    // KHAI BÁO ROUTE CHO NHẬT KÝ UI VÀ DUYỆT PHIẾU
+    { path: "/approvals", name: "approvals", component: Approval },
+    { path: "/ui-logs", name: "ui-logs", component: UiLog },
   ],
 });
 
