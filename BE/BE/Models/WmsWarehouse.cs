@@ -12,6 +12,7 @@ public partial class WmsWarehouse
     public string? Whcode { get; set; }
 
     public string? Whname { get; set; }
+    public string? WhAddress { get; set; }
 
     public virtual HrmBranch? Branch { get; set; }
 

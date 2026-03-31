@@ -13,7 +13,7 @@ const errorMessage = ref('')
 
 const handleLogin = async () => {
   if (!username.value || !password.value) {
-    errorMessage.value = "Sếp vui lòng nhập đủ thông tin!"
+    errorMessage.value = "Vui lòng nhập đủ thông tin!"
     return
   }
 
@@ -24,7 +24,7 @@ const handleLogin = async () => {
   const result = await login(username.value, password.value)
 
   if (result.success) {
-    alert("Đăng nhập thành công! Vào việc thôi sếp!")
+    alert("Đăng nhập thành công")
     // Đẩy sang trang Phiếu Nhập (Hoặc trang Dashboard của sếp)
     router.push('/inbound') 
   } else {
