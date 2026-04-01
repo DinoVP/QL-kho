@@ -12,20 +12,63 @@ const { currentUserRole } = useAuth()
 
 const API_URL = 'https://localhost:7139/api/Employees' 
 
+// ========================================================
+// HÀM TỰ ĐỘNG ĐÍNH KÈM THẺ (TOKEN) CHO MỌI LỜI GỌI API
+// ========================================================
+const getAuthHeaders = () => ({
+  'Content-Type': 'application/json',
+  'Authorization': 'Bearer ' + (localStorage.getItem('authToken') || '')
+})
+
+const getSimpleAuthHeader = () => ({
+  'Authorization': 'Bearer ' + (localStorage.getItem('authToken') || '')
+})
+// ========================================================
+
 const employees = ref([])
 const workplaces = ref({ branches: [], warehouses: [] })
 const isLoading = ref(false)
+
 const searchQuery = ref('') 
+const filterRole = ref('')
+const filterLocation = ref('')
+
+const roleOptions = [
+  { value: 'admin', label: 'Quản trị viên' },
+  { value: 'giam_doc', label: 'Giám đốc' },
+  { value: 'gd_chi_nhanh', label: 'GĐ Chi nhánh' },
+  { value: 'ql_kho', label: 'Quản lý kho' },
+  { value: 'nv_kho', label: 'Nhân viên kho' }
+]
 
 const filteredEmployees = computed(() => {
-  if (!searchQuery.value) return employees.value
-  const query = searchQuery.value.toLowerCase()
-  return employees.value.filter(emp => 
-    (emp.fullName && emp.fullName.toLowerCase().includes(query)) ||
-    (emp.empCode && emp.empCode.toLowerCase().includes(query)) ||
-    (emp.username && emp.username.toLowerCase().includes(query)) ||
-    (emp.phone && emp.phone.includes(query))
-  )
+  let result = employees.value
+
+  if (filterRole.value) {
+    result = result.filter(emp => emp.roleCode === filterRole.value)
+  }
+
+  if (filterLocation.value) {
+    result = result.filter(emp => {
+      if (['admin', 'giam_doc'].includes(emp.roleCode)) return true; 
+      const hasLocation = emp.branchId || emp.warehouseId;
+      if (filterLocation.value === 'has_location') return hasLocation;
+      if (filterLocation.value === 'no_location') return !hasLocation;
+      return true;
+    })
+  }
+
+  if (searchQuery.value) {
+    const query = searchQuery.value.toLowerCase()
+    result = result.filter(emp => 
+      (emp.fullName && emp.fullName.toLowerCase().includes(query)) ||
+      (emp.empCode && emp.empCode.toLowerCase().includes(query)) ||
+      (emp.username && emp.username.toLowerCase().includes(query)) ||
+      (emp.phone && emp.phone.includes(query))
+    )
+  }
+
+  return result
 })
 
 const toast = ref({ show: false, message: '', type: 'success' })
@@ -34,7 +77,6 @@ const showToast = (message, type = 'success') => {
   setTimeout(() => { toast.value.show = false }, 3000) 
 }
 
-// --- MODAL THÊM MỚI ---
 const isAddModalOpen = ref(false)
 const formData = ref({
   fullName: '', phone: '', email: '', departmentId: 1, titleId: 1, 
@@ -47,21 +89,9 @@ const availableWarehouses = computed(() => {
   return workplaces.value.warehouses.filter(w => w.branchId === formData.value.branchId)
 })
 
-// --- MODAL XEM CHI TIẾT ---
 const isDetailModalOpen = ref(false)
 const selectedEmployee = ref(null)
 
-const roleOptions = [
-  { value: 'admin', label: 'Quản trị viên' },
-  { value: 'giam_doc', label: 'Giám đốc' },
-  { value: 'gd_chi_nhanh', label: 'GĐ Chi nhánh' },
-  { value: 'ql_kho', label: 'Quản lý kho' },
-  { value: 'nv_kho', label: 'Nhân viên kho' }
-]
-
-// =========================================================================
-// --- TÍNH NĂNG MỚI: MODAL GÁN LẠI VỊ TRÍ ---
-// =========================================================================
 const isAssignModalOpen = ref(false)
 const assignFormData = ref({ employeeId: null, fullName: '', roleCode: '', branchId: null, warehouseId: null })
 
@@ -82,20 +112,17 @@ const openAssignModal = (emp) => {
 }
 
 const submitAssignWorkplace = async () => {
-  // Bắt lỗi rỗng
   if (['gd_chi_nhanh', 'ql_kho', 'nv_kho'].includes(assignFormData.value.roleCode) && !assignFormData.value.branchId) {
-    showToast('Sếp vui lòng chọn Chi nhánh!', 'error')
-    return
+    showToast('Sếp vui lòng chọn Chi nhánh!', 'error'); return;
   }
   if (['ql_kho', 'nv_kho'].includes(assignFormData.value.roleCode) && !assignFormData.value.warehouseId) {
-    showToast('Sếp vui lòng chọn Kho!', 'error')
-    return
+    showToast('Sếp vui lòng chọn Kho!', 'error'); return;
   }
 
   try {
     const res = await fetch(`${API_URL}/${assignFormData.value.employeeId}/assign-workplace`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(), // <-- Cắm thẻ vào
       body: JSON.stringify({
         branchId: assignFormData.value.branchId,
         warehouseId: assignFormData.value.warehouseId
@@ -105,17 +132,18 @@ const submitAssignWorkplace = async () => {
       showToast('Đã gán vị trí thành công!', 'success')
       isAssignModalOpen.value = false
       fetchData()
-    } else {
-      showToast('Lỗi khi gán vị trí!', 'error')
-    }
+    } else { showToast('Lỗi khi gán vị trí!', 'error') }
   } catch (error) { showToast('Lỗi máy chủ!', 'error') }
 }
-// =========================================================================
 
 const fetchData = async () => {
   isLoading.value = true
   try {
-    const [empRes, workRes] = await Promise.all([ fetch(API_URL), fetch(`${API_URL}/workplaces`) ])
+    // <-- Cắm thẻ vào các request GET
+    const [empRes, workRes] = await Promise.all([ 
+      fetch(API_URL, { headers: getSimpleAuthHeader() }), 
+      fetch(`${API_URL}/workplaces`, { headers: getSimpleAuthHeader() }) 
+    ])
     if (empRes.ok) employees.value = await empRes.json()
     if (workRes.ok) workplaces.value = await workRes.json()
   } catch (error) {
@@ -125,24 +153,14 @@ const fetchData = async () => {
 
 const submitForm = async () => {
   if (!formData.value.fullName || !formData.value.username || !formData.value.password) {
-    showToast('Vui lòng nhập đủ Họ Tên, Tài khoản và Mật khẩu!', 'error');
-    return;
+    showToast('Vui lòng nhập đủ Họ Tên, Tài khoản và Mật khẩu!', 'error'); return;
   }
-  
-  if (['gd_chi_nhanh', 'ql_kho', 'nv_kho'].includes(formData.value.roleCode) && !formData.value.branchId) {
-    showToast('Sếp vui lòng chọn Chi nhánh làm việc!', 'error'); return;
-  }
-  if (['ql_kho', 'nv_kho'].includes(formData.value.roleCode) && !formData.value.warehouseId) {
-    showToast('Sếp vui lòng chọn Kho làm việc!', 'error'); return;
-  }
-
   try {
     const response = await fetch(API_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(), // <-- Cắm thẻ vào
       body: JSON.stringify(formData.value)
     })
-    
     if (response.ok) {
       const result = await response.json()
       showToast(result.message, 'success') 
@@ -159,7 +177,10 @@ const submitForm = async () => {
 const toggleStatus = async (employeeId) => {
   if(!confirm('Sếp có chắc muốn thay đổi trạng thái tài khoản này?')) return
   try {
-    const response = await fetch(`${API_URL}/toggle-status/${employeeId}`, { method: 'PUT' })
+    const response = await fetch(`${API_URL}/toggle-status/${employeeId}`, { 
+      method: 'PUT',
+      headers: getSimpleAuthHeader() // <-- Cắm thẻ vào
+    })
     if (response.ok) {
       const result = await response.json()
       showToast(result.message, 'success')
@@ -171,7 +192,10 @@ const toggleStatus = async (employeeId) => {
 const removeWorkplace = async (employeeId, empName) => {
   if (!confirm(`Sếp có chắc muốn gỡ "${empName}" ra khỏi vị trí làm việc hiện tại?`)) return
   try {
-    const res = await fetch(`${API_URL}/remove-workplace/${employeeId}`, { method: 'PUT' })
+    const res = await fetch(`${API_URL}/remove-workplace/${employeeId}`, { 
+      method: 'PUT',
+      headers: getSimpleAuthHeader() // <-- Cắm thẻ vào
+    })
     if (res.ok) {
       showToast('Đã gỡ nhân viên khỏi vị trí làm việc!', 'success')
       fetchData()
@@ -205,13 +229,24 @@ onMounted(() => { fetchData() })
         <UserCircleIcon class="w-8 h-8 text-primary-600" /> Quản lý Nhân sự & Phân quyền
       </h2>
       
-      <div class="flex items-center gap-3 w-full md:w-auto">
-        <div class="relative w-full md:w-64">
+      <div class="flex flex-wrap items-center gap-3 w-full md:w-auto">
+        <div class="relative w-full sm:w-56">
           <div class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
             <MagnifyingGlassIcon class="w-5 h-5 text-gray-400" />
           </div>
           <input v-model="searchQuery" type="text" class="bg-white border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-primary-500 focus:border-primary-500 block w-full pl-10 p-2.5 shadow-sm" placeholder="Tìm mã, tên, SĐT...">
         </div>
+
+        <select v-model="filterRole" class="bg-white border border-gray-300 text-sm rounded-lg p-2.5 shadow-sm outline-none">
+          <option value="">Tất cả Vai trò</option>
+          <option v-for="role in roleOptions" :key="role.value" :value="role.value">{{ role.label }}</option>
+        </select>
+
+        <select v-model="filterLocation" class="bg-white border border-gray-300 text-sm rounded-lg p-2.5 shadow-sm outline-none">
+          <option value="">Tất cả Vị trí</option>
+          <option value="has_location">Đã có vị trí</option>
+          <option value="no_location">Chưa có vị trí</option>
+        </select>
 
         <button v-if="currentUserRole === 'admin'" @click="isAddModalOpen = true" class="bg-primary-600 hover:bg-primary-700 text-white px-4 py-2.5 rounded-lg font-medium shadow flex items-center gap-2 transition-colors whitespace-nowrap">
           <PlusIcon class="w-5 h-5" /> Thêm NV
@@ -375,14 +410,14 @@ onMounted(() => { fetchData() })
               <div v-if="['admin', 'giam_doc'].includes(formData.roleCode)" class="text-sm text-gray-500 italic mt-4 text-center">Quyền quản trị không gán cố định.</div>
               <div v-if="['gd_chi_nhanh', 'ql_kho', 'nv_kho'].includes(formData.roleCode)" class="mt-2 space-y-4 animate-fade-in">
                 <div>
-                  <label class="block text-sm font-bold text-blue-700 mb-1">Chọn Chi nhánh *</label>
+                  <label class="block text-sm font-bold text-blue-700 mb-1">Chọn Chi nhánh (Tùy chọn)</label>
                   <select v-model="formData.branchId" class="w-full border border-blue-300 rounded-lg p-2.5 bg-white">
                     <option :value="null">-- Chọn Chi nhánh --</option>
                     <option v-for="b in workplaces.branches" :key="b.branchId" :value="b.branchId">{{ b.branchName }}</option>
                   </select>
                 </div>
                 <div v-if="['ql_kho', 'nv_kho'].includes(formData.roleCode) && formData.branchId" class="animate-fade-in">
-                  <label class="block text-sm font-bold text-orange-600 mb-1">Chọn Kho *</label>
+                  <label class="block text-sm font-bold text-orange-600 mb-1">Chọn Kho (Tùy chọn)</label>
                   <select v-model="formData.warehouseId" class="w-full border border-orange-300 rounded-lg p-2.5 bg-white">
                     <option :value="null">-- Chọn Kho --</option>
                     <option v-for="w in availableWarehouses" :key="w.warehouseId" :value="w.warehouseId">{{ w.warehouseName }}</option>

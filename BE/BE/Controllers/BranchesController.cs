@@ -2,6 +2,8 @@
 using Microsoft.EntityFrameworkCore;
 using BE.Models;
 using System;
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace BE.Controllers
 {
@@ -13,32 +15,40 @@ namespace BE.Controllers
         public BranchesController(QLKhoContext context) { _context = context; }
 
         // =========================================================================
-        // HÀM BÍ MẬT: CHUYÊN DÙNG ĐỂ GHI VẾT LOG (CAMERA AN NINH)
+        // CAMERA AN NINH TỰ ĐỘNG
         // =========================================================================
-        private async Task WriteAuditLogAsync(string actionType, string tableName)
+        private async Task WriteAuditLogAsync(string actionType, string tableName, string details = "")
         {
             try
             {
+                int? currentUserId = null;
+                var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)
+                               ?? User.FindFirst("UserId")
+                               ?? User.FindFirst("id");
+
+                if (userIdClaim != null && int.TryParse(userIdClaim.Value, out int parsedId))
+                {
+                    currentUserId = parsedId;
+                }
+
                 var log = new SysAuditLog
                 {
-                    UserId = null, // ĐÃ FIX: Tạm để null để né lỗi khóa ngoại (chờ làm xong module Login)
+                    UserId = currentUserId,
                     ActionType = actionType,
                     TableName = tableName,
+                    Details = details,
                     LogDate = DateTime.Now
                 };
 
-                // ĐÃ FIX: Dùng hàm Add chung của _context để không sợ sai tên DbSet
                 _context.Add(log);
                 await _context.SaveChangesAsync();
             }
             catch (Exception ex)
             {
-                // Đã mở khóa báo lỗi ra Console của Visual Studio để dễ debug
                 Console.WriteLine("==== LỖI GHI LOG: " + ex.InnerException?.Message ?? ex.Message);
             }
         }
         // =========================================================================
-
 
         [HttpGet("available-managers")]
         public async Task<IActionResult> GetAvailableManagers()
@@ -115,8 +125,8 @@ namespace BE.Controllers
 
                 await transaction.CommitAsync();
 
-                // 🟢 GỌI CAMERA GHI LOG LẠI THAO TÁC THÊM CHI NHÁNH
-                await WriteAuditLogAsync("INSERT", $"Chi nhánh: {request.Name}");
+                // 🟢 GHI LOG
+                await WriteAuditLogAsync("INSERT", $"Chi nhánh: {request.Name}", $"Tạo mới chi nhánh mã {newCode}.");
 
                 return Ok(new { message = $"Đã tạo chi nhánh {newCode} thành công!" });
             }
@@ -145,8 +155,8 @@ namespace BE.Controllers
 
                 await transaction.CommitAsync();
 
-                // 🟡 GỌI CAMERA GHI LOG LẠI THAO TÁC CẬP NHẬT CHI NHÁNH
-                await WriteAuditLogAsync("UPDATE", $"Chi nhánh: {request.Name}");
+                // 🟡 GHI LOG
+                await WriteAuditLogAsync("UPDATE", $"Chi nhánh: {request.Name}", $"Cập nhật thông tin chi nhánh: {request.Name}");
 
                 return Ok(new { message = "Cập nhật chi nhánh thành công!" });
             }
@@ -162,7 +172,7 @@ namespace BE.Controllers
                 var branch = await _context.HrmBranches.FindAsync(id);
                 if (branch == null) return NotFound(new { message = "Không tìm thấy chi nhánh!" });
 
-                string branchName = branch.BranchName; // Lưu lại tên để lát ghi log
+                string branchName = branch.BranchName;
 
                 var hasWarehouses = await _context.WmsWarehouses.AnyAsync(w => w.BranchId == id);
                 if (hasWarehouses) return BadRequest(new { message = "Sếp vui lòng xóa hết Kho trực thuộc trước khi xóa Chi nhánh nhé!" });
@@ -180,8 +190,8 @@ namespace BE.Controllers
 
                 await transaction.CommitAsync();
 
-                // 🔴 GỌI CAMERA GHI LOG LẠI THAO TÁC XÓA CHI NHÁNH
-                await WriteAuditLogAsync("DELETE", $"Chi nhánh: {branchName}");
+                // 🔴 GHI LOG
+                await WriteAuditLogAsync("DELETE", $"Chi nhánh: {branchName}", $"Xóa chi nhánh {branchName} và gỡ các nhân sự liên quan.");
 
                 return Ok(new { message = "Xóa chi nhánh thành công!" });
             }
@@ -229,8 +239,8 @@ namespace BE.Controllers
                 _context.WmsWarehouses.Add(newWh);
                 await _context.SaveChangesAsync();
 
-                // 🟢 GHI LOG THÊM KHO
-                await WriteAuditLogAsync("INSERT", $"Kho: {request.Name}");
+                // 🟢 GHI LOG
+                await WriteAuditLogAsync("INSERT", $"Kho: {request.Name}", $"Tạo nhanh kho mới thuộc chi nhánh ID: {branchId}.");
 
                 return Ok(new { message = "Tạo Kho thành công!" });
             }
@@ -255,8 +265,8 @@ namespace BE.Controllers
 
                 await transaction.CommitAsync();
 
-                // 🔴 GHI LOG XÓA KHO
-                await WriteAuditLogAsync("DELETE", $"Kho: {whName}");
+                // 🔴 GHI LOG
+                await WriteAuditLogAsync("DELETE", $"Kho: {whName}", $"Xóa kho {whName} và gỡ toàn bộ nhân sự khỏi kho.");
 
                 return Ok(new { message = "Xóa kho thành công! Nhân sự thuộc kho đã được tự động gỡ." });
             }
@@ -274,8 +284,8 @@ namespace BE.Controllers
             {
                 await _context.Database.ExecuteSqlRawAsync("UPDATE HRM_Employees SET WarehouseId = NULL WHERE WarehouseId = {0}", warehouseId);
 
-                // 🟡 GHI LOG GỠ TOÀN BỘ NHÂN SỰ
-                await WriteAuditLogAsync("UPDATE", $"Gỡ nhân sự khỏi Kho ID: {warehouseId}");
+                // 🟡 GHI LOG
+                await WriteAuditLogAsync("UPDATE", $"Gỡ nhân sự khỏi Kho ID: {warehouseId}", $"Thực hiện gỡ toàn bộ nhân sự đang làm việc tại kho này.");
 
                 return Ok(new { message = "Đã gỡ TẤT CẢ nhân sự ra khỏi kho!" });
             }

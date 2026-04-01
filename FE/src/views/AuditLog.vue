@@ -34,7 +34,8 @@ const filteredLogs = computed(() => {
     result = result.filter(log => 
       log.userName?.toLowerCase().includes(q) || 
       log.tableName?.toLowerCase().includes(q) ||
-      log.actionType?.toLowerCase().includes(q)
+      log.actionType?.toLowerCase().includes(q) ||
+      log.details?.toLowerCase().includes(q) // Cho phép tìm kiếm luôn trong cột chi tiết
     )
   }
 
@@ -96,7 +97,7 @@ onMounted(() => fetchLogs())
         <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
           <MagnifyingGlassIcon class="w-5 h-5 text-gray-400" />
         </div>
-        <input v-model="searchQuery" type="text" class="block w-full h-10 pl-10 pr-3 border border-gray-200 rounded-lg text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all" placeholder="Tìm theo người dùng, đối tượng tác động...">
+        <input v-model="searchQuery" type="text" class="block w-full h-10 pl-10 pr-3 border border-gray-200 rounded-lg text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all" placeholder="Tìm theo người dùng, đối tượng tác động, chi tiết...">
       </div>
       
       <div class="flex gap-2 w-full sm:w-auto">
@@ -148,7 +149,7 @@ onMounted(() => fetchLogs())
                 </span>
               </td>
               <td class="px-5 py-4 text-sm font-medium text-gray-800">{{ log.tableName }}</td>
-              <td class="px-5 py-4 text-sm text-gray-600 max-w-sm truncate">
+              <td class="px-5 py-4 text-sm text-gray-600 max-w-sm truncate" :title="log.details">
                 {{ log.details || 'Hệ thống ghi nhận thay đổi tại phân hệ này.' }}
               </td>
             </tr>

@@ -2,6 +2,8 @@
 using Microsoft.EntityFrameworkCore;
 using BE.Models;
 using System;
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace BE.Controllers
 {
@@ -13,27 +15,37 @@ namespace BE.Controllers
         public EmployeesController(QLKhoContext context) { _context = context; }
 
         // =========================================================================
-        // CAMERA AN NINH: DÙNG ĐỂ GHI LOG BÊN PHÂN HỆ NHÂN SỰ
+        // CAMERA AN NINH: TỰ ĐỘNG BẮT ID TỪ TOKEN ĐĂNG NHẬP (KHÔNG CẦN FIX CỨNG NỮA)
         // =========================================================================
-        private async Task WriteAuditLogAsync(string actionType, string tableName)
+        private async Task WriteAuditLogAsync(string actionType, string tableName, string details = "")
         {
             try
             {
+                int? currentUserId = null;
+                // Tự động moi ID của người dùng từ hệ thống định danh (Token)
+                var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)
+                               ?? User.FindFirst("UserId")
+                               ?? User.FindFirst("id");
+
+                if (userIdClaim != null && int.TryParse(userIdClaim.Value, out int parsedId))
+                {
+                    currentUserId = parsedId;
+                }
+
                 var log = new SysAuditLog
                 {
-                    UserId = null, // ĐÃ FIX: Tạm để null để né lỗi khóa ngoại (chờ làm xong module Login)
+                    UserId = currentUserId, // Hệ thống tự điền ID thật
                     ActionType = actionType,
                     TableName = tableName,
+                    Details = details,
                     LogDate = DateTime.Now
                 };
 
-                // ĐÃ FIX: Dùng hàm Add chung của _context để không sợ sai tên DbSet
                 _context.Add(log);
                 await _context.SaveChangesAsync();
             }
             catch (Exception ex)
             {
-                // Đã mở khóa báo lỗi ra Console của Visual Studio để dễ debug
                 Console.WriteLine("==== LỖI GHI LOG: " + ex.InnerException?.Message ?? ex.Message);
             }
         }
@@ -102,8 +114,8 @@ namespace BE.Controllers
 
                 await transaction.CommitAsync();
 
-                // 🟢 GHI LOG: THÊM MỚI NHÂN VIÊN
-                await WriteAuditLogAsync("INSERT", $"Nhân sự: {newCode} - {request.FullName}");
+                // 🟢 GHI LOG TỰ ĐỘNG
+                await WriteAuditLogAsync("INSERT", $"Nhân sự: {newCode} - {request.FullName}", $"Tạo mới tài khoản {request.Username} và phân quyền {request.RoleCode}.");
 
                 return Ok(new { message = $"Tạo thành công {newCode}" });
             }
@@ -116,7 +128,7 @@ namespace BE.Controllers
             var emp = await _context.HrmEmployees.FindAsync(id);
             if (emp == null) return NotFound();
 
-            string empName = emp.FullName; // Lưu tên để ghi log
+            string empName = emp.FullName;
 
             var roleCode = await _context.Database.SqlQueryRaw<string>("SELECT r.RoleCode AS Value FROM SYS_Users u INNER JOIN SYS_UserRoles ur ON u.UserId = ur.UserId INNER JOIN SYS_Roles r ON ur.RoleId = r.RoleId WHERE u.EmployeeId = {0}", id).FirstOrDefaultAsync();
 
@@ -129,8 +141,8 @@ namespace BE.Controllers
             emp.WarehouseId = null;
             await _context.SaveChangesAsync();
 
-            // 🟡 GHI LOG: GỠ VỊ TRÍ
-            await WriteAuditLogAsync("UPDATE", $"Nhân sự: Gỡ vị trí làm việc của {empName}");
+            // 🟡 GHI LOG TỰ ĐỘNG
+            await WriteAuditLogAsync("UPDATE", $"Nhân sự: Gỡ vị trí làm việc của {empName}", $"Đã gỡ {empName} khỏi vị trí Chi nhánh/Kho hiện tại.");
 
             return Ok(new { message = "Đã gỡ nhân viên khỏi vị trí làm việc" });
         }
@@ -154,8 +166,8 @@ namespace BE.Controllers
                     await _context.Database.ExecuteSqlRawAsync("UPDATE HRM_Branches SET ManagerId = {0} WHERE BranchId = {1}", id, request.BranchId.Value);
                 }
 
-                // 🟡 GHI LOG: GÁN VỊ TRÍ
-                await WriteAuditLogAsync("UPDATE", $"Nhân sự: Gán vị trí mới cho {emp.FullName}");
+                // 🟡 GHI LOG TỰ ĐỘNG
+                await WriteAuditLogAsync("UPDATE", $"Nhân sự: Gán vị trí mới cho {emp.FullName}", $"Cập nhật nơi làm việc (BranchId: {request.BranchId}, WarehouseId: {request.WarehouseId}).");
 
                 return Ok(new { message = "Cập nhật vị trí làm việc thành công!" });
             }
@@ -172,9 +184,9 @@ namespace BE.Controllers
 
             var empName = await _context.HrmEmployees.Where(e => e.EmployeeId == id).Select(e => e.FullName).FirstOrDefaultAsync();
 
-            // 🔴 GHI LOG: KHÓA / MỞ KHÓA TÀI KHOẢN
+            // 🔴 GHI LOG TỰ ĐỘNG
             string statusStr = user.IsActive == true ? "Mở khóa" : "Khóa";
-            await WriteAuditLogAsync("UPDATE", $"Tài khoản: {statusStr} tài khoản của {empName}");
+            await WriteAuditLogAsync("UPDATE", $"Tài khoản: {statusStr} tài khoản của {empName}", $"Thay đổi trạng thái đăng nhập thành: {statusStr}.");
 
             return Ok(new { message = user.IsActive == true ? "Đã mở khóa tài khoản" : "Đã khóa tài khoản" });
         }

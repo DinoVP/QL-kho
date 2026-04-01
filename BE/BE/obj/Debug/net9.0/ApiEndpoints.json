@@ -184,6 +184,89 @@
     "ReturnTypes": []
   },
   {
+    "ContainingType": "BE.Controllers.CrmPartnersController",
+    "Method": "GetPartners",
+    "RelativePath": "api/CrmPartners",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": [
+      {
+        "Type": "System.Collections.Generic.IEnumerable\u00601[[BE.Models.CrmPartner, BE, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
+        "MediaTypes": [
+          "text/plain",
+          "application/json",
+          "text/json"
+        ],
+        "StatusCode": 200
+      }
+    ]
+  },
+  {
+    "ContainingType": "BE.Controllers.CrmPartnersController",
+    "Method": "CreatePartner",
+    "RelativePath": "api/CrmPartners",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "partner",
+        "Type": "BE.Models.CrmPartner",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": [
+      {
+        "Type": "BE.Models.CrmPartner",
+        "MediaTypes": [
+          "text/plain",
+          "application/json",
+          "text/json"
+        ],
+        "StatusCode": 200
+      }
+    ]
+  },
+  {
+    "ContainingType": "BE.Controllers.CrmPartnersController",
+    "Method": "UpdatePartner",
+    "RelativePath": "api/CrmPartners/{id}",
+    "HttpMethod": "PUT",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Int32",
+        "IsRequired": true
+      },
+      {
+        "Name": "partner",
+        "Type": "BE.Models.CrmPartner",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "BE.Controllers.CrmPartnersController",
+    "Method": "DeletePartner",
+    "RelativePath": "api/CrmPartners/{id}",
+    "HttpMethod": "DELETE",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Int32",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
     "ContainingType": "BE.Controllers.EmployeesController",
     "Method": "GetAllEmployees",
     "RelativePath": "api/Employees",
@@ -270,6 +353,48 @@
     "IsController": true,
     "Order": 0,
     "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "BE.Controllers.SysUiLogsController",
+    "Method": "GetLogs",
+    "RelativePath": "api/SysUiLogs",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "page",
+        "Type": "System.Int32",
+        "IsRequired": false
+      },
+      {
+        "Name": "limit",
+        "Type": "System.Int32",
+        "IsRequired": false
+      },
+      {
+        "Name": "eventType",
+        "Type": "System.String",
+        "IsRequired": false
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "BE.Controllers.SysUiLogsController",
+    "Method": "CreateLog",
+    "RelativePath": "api/SysUiLogs",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "log",
+        "Type": "BE.Models.SysUiLog",
+        "IsRequired": true
+      }
+    ],
     "ReturnTypes": []
   },
   {

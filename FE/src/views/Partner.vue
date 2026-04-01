@@ -1,12 +1,49 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { 
   MagnifyingGlassIcon, PlusIcon, PencilSquareIcon, 
-  TrashIcon, EyeIcon, XMarkIcon, UserGroupIcon, LinkIcon 
+  TrashIcon, EyeIcon, XMarkIcon, UserGroupIcon, LinkIcon,
+  LockClosedIcon, LockOpenIcon // <-- IMPORT THÊM ICON Ổ KHÓA
 } from '@heroicons/vue/24/outline'
 
-// === 1. STATE: ĐÃ DỌN SẠCH DỮ LIỆU ĐỐI TÁC CHỜ API ===
+// IMPORT CAMERA ĐỂ GHI LOG
+import { uiLogger } from '@/utils/logger' 
+
+// === ĐƯỜNG DẪN API BACKEND ===
+const API_URL = 'https://localhost:7139/api/CrmPartners' 
+
+// === 1. STATE: DỮ LIỆU ĐỐI TÁC ===
 const partners = ref([])
+const isLoading = ref(false)
+
+// === KẾT NỐI API: LẤY DANH SÁCH TỪ DATABASE ===
+const fetchPartners = async () => {
+  isLoading.value = true
+  try {
+    const res = await fetch(API_URL)
+    if (res.ok) {
+      const data = await res.json()
+      const rawList = data.data || data.Data || data || []
+      
+      // Convert Data từ Backend (C#) trả về cho khớp với Giao diện (Vue)
+      partners.value = rawList.map(p => ({
+        id: p.partnerId,
+        code: p.partnerCode,
+        name: p.partnerName,
+        type: p.isSupplier ? 'Nhà cung cấp' : 'Khách hàng',
+        phone: p.phone,
+        email: p.email,
+        address: p.address,
+        status: p.status,
+        assignedSkus: p.assignedSkus || []
+      }))
+    }
+  } catch (error) {
+    console.error('Lỗi tải danh sách đối tác:', error)
+  } finally {
+    isLoading.value = false
+  }
+}
 
 // === 2. STATE: BỘ LỌC TÌM KIẾM ===
 const searchQuery = ref('')
@@ -14,12 +51,51 @@ const filterType = ref('')
 
 const filteredPartners = computed(() => {
   return partners.value.filter(p => {
-    const matchSearch = p.code.toLowerCase().includes(searchQuery.value.toLowerCase()) || 
-                        p.name.toLowerCase().includes(searchQuery.value.toLowerCase())
+    const pCode = p.code || ''
+    const pName = p.name || ''
+    const matchSearch = pCode.toLowerCase().includes(searchQuery.value.toLowerCase()) || 
+                        pName.toLowerCase().includes(searchQuery.value.toLowerCase())
     const matchType = filterType.value === '' || p.type === filterType.value
     return matchSearch && matchType
   })
 })
+
+// === TÍNH NĂNG MỚI: ĐỔI TRẠNG THÁI NHANH ===
+const toggleStatus = async (partner) => {
+  if (!confirm(`Bạn có chắc muốn ${partner.status === 'active' ? 'Ngừng giao dịch' : 'Mở lại giao dịch'} với đối tác ${partner.name}?`)) return;
+  
+  try {
+    const newStatus = partner.status === 'active' ? 'inactive' : 'active';
+    
+    // Đóng gói data gửi xuống BE để cập nhật
+    const payload = {
+      partnerId: partner.id,
+      partnerCode: partner.code,
+      partnerName: partner.name,
+      isSupplier: partner.type === 'Nhà cung cấp',
+      isCustomer: partner.type === 'Khách hàng',
+      phone: partner.phone,
+      email: partner.email,
+      address: partner.address,
+      status: newStatus
+    }
+
+    const res = await fetch(`${API_URL}/${partner.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+
+    if (res.ok) {
+      uiLogger.log('API_CALL', '/partners', `Đổi trạng thái đối tác: ${partner.name} thành ${newStatus}`)
+      await fetchPartners() // Refresh bảng
+    } else {
+      alert('Lỗi cập nhật dữ liệu.')
+    }
+  } catch (error) {
+    console.error('Lỗi khi đổi trạng thái:', error)
+  }
+}
 
 // === 3. LOGIC MODAL: THÊM / SỬA ĐỐI TÁC ===
 const showModal = ref(false)
@@ -34,31 +110,77 @@ const openModal = (mode, partner = null) => {
 }
 const closeModal = () => showModal.value = false
 
-// Tự động sinh mã phân biệt KH và NCC
+// Tự động sinh mã phân biệt KH và NCC (Dựa trên số lượng hiện tại)
 const generateCode = (type) => {
   const prefix = type === 'Nhà cung cấp' ? 'NCC' : 'KH'
-  const count = partners.value.filter(p => p.code.startsWith(prefix)).length
+  const count = partners.value.filter(p => p.code?.startsWith(prefix)).length
   return `${prefix}${(count + 1).toString().padStart(3, '0')}`
 }
 
-const handleSubmit = () => {
-  if (modalMode.value === 'add') {
-    partners.value.push({
-      ...formData.value, id: Date.now(),
-      code: generateCode(formData.value.type) // Ép cứng luôn dùng hàm tự sinh, không lấy từ form
-    })
-    alert('Thêm đối tác thành công!')
-  } else {
-    const idx = partners.value.findIndex(p => p.id === formData.value.id)
-    if (idx !== -1) partners.value[idx] = { ...formData.value }
-    alert('Cập nhật thành công!')
+// === KẾT NỐI API: THÊM VÀ SỬA ===
+const handleSubmit = async () => {
+  try {
+    const payload = {
+      partnerId: formData.value.id || 0,
+      partnerCode: modalMode.value === 'add' ? generateCode(formData.value.type) : formData.value.code,
+      partnerName: formData.value.name,
+      isSupplier: formData.value.type === 'Nhà cung cấp',
+      isCustomer: formData.value.type === 'Khách hàng',
+      phone: formData.value.phone,
+      email: formData.value.email,
+      address: formData.value.address,
+      status: formData.value.status
+    }
+
+    if (modalMode.value === 'add') {
+      const res = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+
+      if (res.ok) {
+        uiLogger.log('API_CALL', '/partners', `Thêm mới đối tác: ${payload.partnerName}`)
+        await fetchPartners() // Load lại bảng
+      } else {
+        alert('Lỗi khi thêm đối tác (Kiểm tra dữ liệu bắt buộc)')
+      }
+
+    } else {
+      const res = await fetch(`${API_URL}/${payload.partnerId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+
+      if (res.ok) {
+        uiLogger.log('API_CALL', '/partners', `Cập nhật đối tác: ${payload.partnerName}`)
+        await fetchPartners()
+      } else {
+         alert('Lỗi cập nhật dữ liệu.')
+      }
+    }
+  } catch (error) {
+    console.error('Lỗi khi lưu:', error)
+  } finally {
+    closeModal()
   }
-  closeModal()
 }
 
-const handleDelete = (id, name) => {
+// === KẾT NỐI API: XÓA ===
+const handleDelete = async (id, name) => {
   if (confirm(`Xóa đối tác "${name}" có thể ảnh hưởng đến lịch sử giao dịch. Tiếp tục xóa?`)) {
-    partners.value = partners.value.filter(p => p.id !== id)
+    try {
+      const res = await fetch(`${API_URL}/${id}`, { method: 'DELETE' })
+      if (res.ok) {
+        uiLogger.log('CLICK', '/partners', `Đã xóa đối tác: ${name}`, { partnerId: id })
+        await fetchPartners()
+      } else {
+        alert('Không thể xóa đối tác này (Có thể đang dính khóa ngoại giao dịch)')
+      }
+    } catch (error) {
+      console.error('Lỗi khi xóa:', error)
+    }
   }
 }
 
@@ -67,7 +189,7 @@ const showAssignModal = ref(false)
 const currentNcc = ref(null)
 const selectedSkus = ref([])
 
-// Giữ lại mock data sản phẩm để sếp test chức năng gán hàng
+// Giữ lại mock data sản phẩm để test chức năng gán hàng
 const mockAllProducts = ref([
   { sku: 'SKU-001', name: 'Laptop Dell XPS 15 9520' },
   { sku: 'SKU-002', name: 'Bột giặt OMO Matic 3.6kg' },
@@ -77,7 +199,7 @@ const mockAllProducts = ref([
 
 const openAssignModal = (ncc) => {
   currentNcc.value = ncc
-  selectedSkus.value = [...ncc.assignedSkus]
+  selectedSkus.value = ncc.assignedSkus ? [...ncc.assignedSkus] : []
   showAssignModal.value = true
 }
 
@@ -86,14 +208,20 @@ const closeAssignModal = () => {
   currentNcc.value = null
 }
 
-const handleSaveAssign = () => {
+const handleSaveAssign = async () => {
   const idx = partners.value.findIndex(p => p.id === currentNcc.value.id)
   if (idx !== -1) {
     partners.value[idx].assignedSkus = [...selectedSkus.value]
   }
-  alert(`Đã gán ${selectedSkus.value.length} mặt hàng cho nhà cung cấp ${currentNcc.value.name}!`)
+  
+  alert(`Đã gán ${selectedSkus.value.length} mặt hàng cho nhà cung cấp ${currentNcc.value.name}! (Chưa gọi API lưu DB)`)
+  uiLogger.log('CLICK', '/partners', `Gán ${selectedSkus.value.length} SKU cho NCC: ${currentNcc.value.name}`)
   closeAssignModal()
 }
+
+onMounted(() => {
+  fetchPartners()
+})
 </script>
 
 <template>
@@ -136,7 +264,10 @@ const handleSaveAssign = () => {
           </thead>
           
           <tbody class="divide-y divide-gray-100 bg-white">
-            <tr v-if="filteredPartners.length === 0">
+            <tr v-if="isLoading">
+               <td colspan="6" class="px-6 py-12 text-center text-gray-500">Đang tải dữ liệu từ Database...</td>
+            </tr>
+            <tr v-else-if="filteredPartners.length === 0">
               <td colspan="6" class="px-6 py-16 text-center">
                 <UserGroupIcon class="w-12 h-12 text-gray-300 mx-auto mb-3" />
                 <h3 class="text-base font-semibold text-gray-700">Chưa có dữ liệu đối tác</h3>
@@ -144,7 +275,7 @@ const handleSaveAssign = () => {
               </td>
             </tr>
 
-            <tr v-for="partner in filteredPartners" :key="partner.id" class="hover:bg-gray-50 transition-colors">
+            <tr v-else v-for="partner in filteredPartners" :key="partner.id" class="hover:bg-gray-50 transition-colors">
               <td class="px-5 py-3 text-sm font-bold text-primary-700">{{ partner.code }}</td>
               <td class="px-5 py-3 text-sm font-bold text-gray-900">{{ partner.name }}</td>
               <td class="px-5 py-3">
@@ -163,12 +294,17 @@ const handleSaveAssign = () => {
               </td>
               <td class="px-5 py-3 text-right space-x-2 whitespace-nowrap">
                 <button v-if="partner.type === 'Nhà cung cấp'" @click="openAssignModal(partner)" class="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded border border-transparent hover:border-emerald-200 transition-colors" title="Gán Sản phẩm cung cấp">
-                  <LinkIcon class="w-5 h-5 inline-block mr-1" /> <span class="text-xs font-bold">{{ partner.assignedSkus.length }} Món</span>
+                  <LinkIcon class="w-5 h-5 inline-block mr-1" /> <span class="text-xs font-bold">{{ partner.assignedSkus ? partner.assignedSkus.length : 0 }} Món</span>
                 </button>
 
                 <button @click="openModal('view', partner)" class="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="Xem chi tiết"><EyeIcon class="w-5 h-5" /></button>
                 <button @click="openModal('edit', partner)" class="p-1.5 text-amber-600 hover:bg-amber-50 rounded" title="Chỉnh sửa"><PencilSquareIcon class="w-5 h-5" /></button>
                 <button @click="handleDelete(partner.id, partner.name)" class="p-1.5 text-red-600 hover:bg-red-50 rounded" title="Xóa"><TrashIcon class="w-5 h-5" /></button>
+                
+                <button @click="toggleStatus(partner)" :title="partner.status === 'active' ? 'Ngừng giao dịch' : 'Mở lại giao dịch'" :class="partner.status === 'active' ? 'text-amber-500 hover:bg-amber-50' : 'text-green-500 hover:bg-green-50'" class="p-1.5 rounded transition-colors border border-transparent hover:border-current">
+                  <LockClosedIcon v-if="partner.status === 'active'" class="w-5 h-5" />
+                  <LockOpenIcon v-else class="w-5 h-5" />
+                </button>
               </td>
             </tr>
           </tbody>
@@ -198,9 +334,7 @@ const handleSaveAssign = () => {
                 
                 <div v-if="modalMode === 'add'">
                   <label class="block text-xs font-bold text-gray-700 mb-1">Mã Đối tác</label>
-                  <div class="w-full border border-gray-200 border-dashed rounded-lg px-3 py-2 text-sm bg-gray-50 text-gray-400 italic">
-                    Hệ thống tự động sinh
-                  </div>
+                  <div class="w-full border border-gray-200 border-dashed rounded-lg px-3 py-2 text-sm bg-gray-50 text-gray-400 italic">Hệ thống tự động sinh</div>
                 </div>
                 <div v-else>
                   <label class="block text-xs font-bold text-gray-700 mb-1">Mã Đối tác</label>

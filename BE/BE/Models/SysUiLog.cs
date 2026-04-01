@@ -1,36 +1,38 @@
 ﻿using System;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using System.Text.Json.Serialization; // <-- THÊM DÒNG NÀY
 
-namespace BE.Models // <-- Đã sửa cho khớp với dự án của bạn
+namespace BE.Models
 {
-    [Table("SysUiLog")]
+    [Table("Sys_UiLogs")]
     public class SysUiLog
     {
         [Key]
         public int Id { get; set; }
 
-        // --- KHÓA NGOẠI LIÊN KẾT VỚI BẢNG SysUser ---
         public int? UserId { get; set; }
 
+        // === SỬA DÒNG NÀY: Thêm JsonIgnore và dấu ? ===
+        [JsonIgnore]
         [ForeignKey("UserId")]
-        public virtual SysUser SysUser { get; set; }
+        public virtual SysUser? SysUser { get; set; }
+        // ===============================================
 
-        // Lưu thêm tên đăng nhập để query cho nhanh không cần Join
         [StringLength(100)]
         public string UserName { get; set; }
 
         [StringLength(50)]
-        public string EventType { get; set; } // NAVIGATION, CLICK, API_CALL, ERROR
+        public string EventType { get; set; }
 
         [StringLength(255)]
-        public string Path { get; set; } // Đường dẫn URL lúc xảy ra sự kiện
+        public string Path { get; set; }
 
         [StringLength(500)]
-        public string Message { get; set; } // Mô tả ngắn gọn sự kiện
+        public string Message { get; set; }
 
-        public string Details { get; set; } // Chuỗi JSON chứa dữ liệu chi tiết
+        public string Details { get; set; }
 
-        public DateTime LogDate { get; set; } = DateTime.Now; // Thời gian ghi log
+        public DateTime LogDate { get; set; } = DateTime.Now;
     }
-}
+} 

@@ -1,6 +1,9 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using BE.Models;
+using System.Linq;
+using System.Threading.Tasks;
+using System;
 
 namespace BE.Controllers
 {
@@ -20,7 +23,7 @@ namespace BE.Controllers
         {
             try
             {
-                // BƯỚC 1: Kéo dữ liệu thô từ Database lên trước (Để tránh lỗi convert font của SQL Server)
+                // BƯỚC 1: Kéo dữ liệu thô từ Database lên trước (ĐÃ BỔ SUNG CỘT DETAILS)
                 var rawLogs = await (from a in _context.Set<SysAuditLog>()
                                      join u in _context.SysUsers on a.UserId equals u.UserId into uGroup
                                      from u in uGroup.DefaultIfEmpty()
@@ -35,10 +38,11 @@ namespace BE.Controllers
                                          Username = u != null ? u.Username : null,
                                          ActionType = a.ActionType,
                                          TableName = a.TableName,
+                                         Details = a.Details, // <--- THÊM DÒNG NÀY ĐỂ MÓC CHI TIẾT LÊN
                                          LogDate = a.LogDate
                                      }).Take(500).ToListAsync(); // Lấy 500 dòng mới nhất
 
-                // BƯỚC 2: Xử lý gán chữ Tiếng Việt trên RAM của C# (Đảm bảo 100% không bao giờ lỗi font)
+                // BƯỚC 2: Xử lý gán chữ Tiếng Việt trên RAM của C#
                 var logs = rawLogs.Select(a => new AuditLogDto
                 {
                     LogId = a.LogId,
@@ -48,6 +52,7 @@ namespace BE.Controllers
                              : (!string.IsNullOrWhiteSpace(a.Username) ? a.Username : "Hệ thống"),
                     ActionType = a.ActionType ?? "SYSTEM",
                     TableName = a.TableName ?? "Hệ thống",
+                    Details = a.Details, // <--- CHUYỂN DỮ LIỆU VÀO DTO
                     LogDate = a.LogDate
                 }).ToList();
 
@@ -70,6 +75,7 @@ namespace BE.Controllers
         public string UserName { get; set; }
         public string ActionType { get; set; }
         public string TableName { get; set; }
+        public string Details { get; set; } // <--- KHAI BÁO THÊM TRƯỜNG DETAILS Ở ĐÂY
         public DateTime? LogDate { get; set; }
     }
 }
