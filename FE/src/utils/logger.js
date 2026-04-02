@@ -5,7 +5,6 @@ export const uiLogger = {
     try {
       let userInfo = { userName: "Khách (Chưa Login)", id: null };
 
-      // BƯỚC 1: Lấy đúng tên biến mà sếp đã lưu trong useAuth.js
       const token = localStorage.getItem("authToken");
       const savedUsername = localStorage.getItem("username");
 
@@ -13,12 +12,11 @@ export const uiLogger = {
         userInfo.userName = savedUsername;
       }
 
-      // BƯỚC 2: Giải mã JWT authToken để moi cái UserId ra (Vì useAuth không lưu ID)
       if (token) {
         try {
           const base64Url = token.split(".")[1];
           const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
-          const payload = JSON.parse(
+          const decodedPayload = JSON.parse(
             decodeURIComponent(
               window
                 .atob(base64)
@@ -30,16 +28,15 @@ export const uiLogger = {
             ),
           );
 
-          // Cố gắng bắt ID theo chuẩn của C# JWT
           const idClaim =
-            payload[
+            decodedPayload[
               "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier"
             ] ||
-            payload.nameid ||
-            payload.sub ||
-            payload.UserId ||
-            payload.EmployeeId ||
-            payload.Id;
+            decodedPayload.nameid ||
+            decodedPayload.sub ||
+            decodedPayload.UserId ||
+            decodedPayload.EmployeeId ||
+            decodedPayload.Id;
 
           if (idClaim) userInfo.id = parseInt(idClaim);
         } catch (e) {
@@ -47,23 +44,19 @@ export const uiLogger = {
         }
       }
 
-      // BƯỚC 3: Đóng gói dữ liệu và bắn xuống Backend
       const payload = {
         userId: userInfo.id,
         userName: userInfo.userName,
-        eventType: eventType, // 'NAVIGATION', 'CLICK', 'API_CALL', 'ERROR'
+        eventType: eventType,
         path: path,
         message: message,
-        details: details ? JSON.stringify(details) : null,
+        details: details ? JSON.stringify(details) : "", // <-- FIX TẠI ĐÂY LÀ HẾT LỖI 400
       };
-
-      console.log("🚀 Đang chuẩn bị bắn Log UI:", payload);
 
       fetch(API_URL, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          // Đính kèm token chuẩn để Backend cho phép lưu
           Authorization: "Bearer " + (token || ""),
         },
         body: JSON.stringify(payload),
@@ -79,9 +72,9 @@ export const uiLogger = {
             console.log("✅ Đã lưu Log UI thành công xuống Database!");
           }
         })
-        .catch((err) => {
-          console.error("❌ Lỗi kết nối mạng khi gửi UI Log:", err);
-        });
+        .catch((err) =>
+          console.error("❌ Lỗi kết nối mạng khi gửi UI Log:", err),
+        );
     } catch (error) {
       console.error("Lỗi khởi tạo UI Log:", error);
     }
