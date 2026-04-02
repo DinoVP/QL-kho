@@ -2,8 +2,8 @@
 import { ref, computed, onMounted } from 'vue'
 import { 
   MagnifyingGlassIcon, PlusIcon, PencilSquareIcon, 
-  TrashIcon, EyeIcon, XMarkIcon, UserGroupIcon, LinkIcon,
-  LockClosedIcon, LockOpenIcon // <-- IMPORT THÊM ICON Ổ KHÓA
+  TrashIcon, EyeIcon, XMarkIcon, UserGroupIcon,
+  LockClosedIcon, LockOpenIcon 
 } from '@heroicons/vue/24/outline'
 
 // IMPORT CAMERA ĐỂ GHI LOG
@@ -34,8 +34,7 @@ const fetchPartners = async () => {
         phone: p.phone,
         email: p.email,
         address: p.address,
-        status: p.status,
-        assignedSkus: p.assignedSkus || []
+        status: p.status
       }))
     }
   } catch (error) {
@@ -60,7 +59,7 @@ const filteredPartners = computed(() => {
   })
 })
 
-// === TÍNH NĂNG MỚI: ĐỔI TRẠNG THÁI NHANH ===
+// === ĐỔI TRẠNG THÁI NHANH ===
 const toggleStatus = async (partner) => {
   if (!confirm(`Bạn có chắc muốn ${partner.status === 'active' ? 'Ngừng giao dịch' : 'Mở lại giao dịch'} với đối tác ${partner.name}?`)) return;
   
@@ -100,17 +99,17 @@ const toggleStatus = async (partner) => {
 // === 3. LOGIC MODAL: THÊM / SỬA ĐỐI TÁC ===
 const showModal = ref(false)
 const modalMode = ref('add') 
-const formData = ref({ id: null, code: '', name: '', type: 'Khách hàng', phone: '', email: '', address: '', status: 'active', assignedSkus: [] })
+const formData = ref({ id: null, code: '', name: '', type: 'Khách hàng', phone: '', email: '', address: '', status: 'active' })
 
 const openModal = (mode, partner = null) => {
   modalMode.value = mode
   if (partner) formData.value = { ...partner } 
-  else formData.value = { id: null, code: '', name: '', type: 'Khách hàng', phone: '', email: '', address: '', status: 'active', assignedSkus: [] }
+  else formData.value = { id: null, code: '', name: '', type: 'Khách hàng', phone: '', email: '', address: '', status: 'active' }
   showModal.value = true
 }
 const closeModal = () => showModal.value = false
 
-// Tự động sinh mã phân biệt KH và NCC (Dựa trên số lượng hiện tại)
+// Tự động sinh mã phân biệt KH và NCC
 const generateCode = (type) => {
   const prefix = type === 'Nhà cung cấp' ? 'NCC' : 'KH'
   const count = partners.value.filter(p => p.code?.startsWith(prefix)).length
@@ -141,7 +140,7 @@ const handleSubmit = async () => {
 
       if (res.ok) {
         uiLogger.log('API_CALL', '/partners', `Thêm mới đối tác: ${payload.partnerName}`)
-        await fetchPartners() // Load lại bảng
+        await fetchPartners() 
       } else {
         alert('Lỗi khi thêm đối tác (Kiểm tra dữ liệu bắt buộc)')
       }
@@ -184,41 +183,6 @@ const handleDelete = async (id, name) => {
   }
 }
 
-// === 4. LOGIC MODAL: GÁN HÀNG CHO NHÀ CUNG CẤP ===
-const showAssignModal = ref(false)
-const currentNcc = ref(null)
-const selectedSkus = ref([])
-
-// Giữ lại mock data sản phẩm để test chức năng gán hàng
-const mockAllProducts = ref([
-  { sku: 'SKU-001', name: 'Laptop Dell XPS 15 9520' },
-  { sku: 'SKU-002', name: 'Bột giặt OMO Matic 3.6kg' },
-  { sku: 'SKU-003', name: 'Màn hình LG 27UP850-W' },
-  { sku: 'SKU-004', name: 'Bàn phím cơ Keychron K8' }
-])
-
-const openAssignModal = (ncc) => {
-  currentNcc.value = ncc
-  selectedSkus.value = ncc.assignedSkus ? [...ncc.assignedSkus] : []
-  showAssignModal.value = true
-}
-
-const closeAssignModal = () => {
-  showAssignModal.value = false
-  currentNcc.value = null
-}
-
-const handleSaveAssign = async () => {
-  const idx = partners.value.findIndex(p => p.id === currentNcc.value.id)
-  if (idx !== -1) {
-    partners.value[idx].assignedSkus = [...selectedSkus.value]
-  }
-  
-  alert(`Đã gán ${selectedSkus.value.length} mặt hàng cho nhà cung cấp ${currentNcc.value.name}! (Chưa gọi API lưu DB)`)
-  uiLogger.log('CLICK', '/partners', `Gán ${selectedSkus.value.length} SKU cho NCC: ${currentNcc.value.name}`)
-  closeAssignModal()
-}
-
 onMounted(() => {
   fetchPartners()
 })
@@ -230,7 +194,7 @@ onMounted(() => {
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
       <div>
         <h2 class="text-xl md:text-2xl font-bold text-gray-800">Quản lý Đối tác</h2>
-        <p class="text-xs md:text-sm text-gray-500 mt-1">Quản lý Khách hàng và Nhà cung cấp (Gán hàng theo NCC)</p>
+        <p class="text-xs md:text-sm text-gray-500 mt-1">Quản lý danh sách Khách hàng và Nhà cung cấp</p>
       </div>
       <button @click="openModal('add')" class="bg-primary-600 hover:bg-primary-700 text-white px-4 py-2.5 rounded-lg flex items-center gap-2 text-sm font-semibold transition-colors shadow-sm">
         <PlusIcon class="w-5 h-5" /> Thêm Đối tác
@@ -293,10 +257,6 @@ onMounted(() => {
                 <span v-else class="text-xs font-bold px-2.5 py-1 rounded bg-red-100 text-red-700">Ngừng giao dịch</span>
               </td>
               <td class="px-5 py-3 text-right space-x-2 whitespace-nowrap">
-                <button v-if="partner.type === 'Nhà cung cấp'" @click="openAssignModal(partner)" class="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded border border-transparent hover:border-emerald-200 transition-colors" title="Gán Sản phẩm cung cấp">
-                  <LinkIcon class="w-5 h-5 inline-block mr-1" /> <span class="text-xs font-bold">{{ partner.assignedSkus ? partner.assignedSkus.length : 0 }} Món</span>
-                </button>
-
                 <button @click="openModal('view', partner)" class="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="Xem chi tiết"><EyeIcon class="w-5 h-5" /></button>
                 <button @click="openModal('edit', partner)" class="p-1.5 text-amber-600 hover:bg-amber-50 rounded" title="Chỉnh sửa"><PencilSquareIcon class="w-5 h-5" /></button>
                 <button @click="handleDelete(partner.id, partner.name)" class="p-1.5 text-red-600 hover:bg-red-50 rounded" title="Xóa"><TrashIcon class="w-5 h-5" /></button>
@@ -376,43 +336,6 @@ onMounted(() => {
                 <button v-if="modalMode !== 'view'" type="submit" class="px-4 py-2 bg-primary-600 text-white rounded-lg text-sm hover:bg-primary-700 shadow-sm">Lưu thay đổi</button>
               </div>
             </form>
-          </div>
-        </div>
-      </div>
-    </Teleport>
-
-    <Teleport to="body">
-      <div v-if="showAssignModal" class="fixed inset-0 z-50 flex items-center justify-center px-4 bg-slate-900/50 backdrop-blur-sm animate-fade-in">
-        <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden transform transition-all">
-          <div class="px-4 md:px-6 py-4 border-b border-emerald-100 bg-emerald-50 flex items-center justify-between">
-            <div>
-              <h3 class="text-lg font-bold text-emerald-800 flex items-center gap-2"><LinkIcon class="w-5 h-5"/> Cấu hình Hàng hóa NCC</h3>
-              <p class="text-xs text-emerald-600 mt-1">Đang gán cho: <strong>{{ currentNcc?.name }}</strong></p>
-            </div>
-            <button @click="closeAssignModal" class="text-gray-400 hover:text-red-500 p-1"><XMarkIcon class="w-6 h-6" /></button>
-          </div>
-
-          <div class="p-4 md:p-6">
-            <p class="text-sm text-gray-600 mb-4">Vui lòng chọn (tick) các mặt hàng mà nhà cung cấp này có thể giao:</p>
-            
-            <div class="space-y-2 border border-gray-200 rounded-lg p-3 max-h-60 overflow-y-auto custom-scrollbar">
-              <label v-for="product in mockAllProducts" :key="product.sku" class="flex items-start gap-3 p-2 hover:bg-gray-50 rounded cursor-pointer transition-colors border border-transparent hover:border-gray-200">
-                <input type="checkbox" :value="product.sku" v-model="selectedSkus" class="mt-1 w-4 h-4 text-emerald-600 border-gray-300 rounded focus:ring-emerald-500 cursor-pointer">
-                <div class="flex flex-col">
-                  <span class="text-sm font-bold text-gray-800">{{ product.name }}</span>
-                  <span class="text-xs text-gray-500">Mã SKU: {{ product.sku }}</span>
-                </div>
-              </label>
-            </div>
-            
-            <div class="mt-2 text-xs font-medium text-emerald-600">Đã chọn: {{ selectedSkus.length }} mặt hàng</div>
-
-            <div class="mt-6 pt-4 border-t border-gray-100 flex justify-end gap-3">
-              <button type="button" @click="closeAssignModal" class="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">Hủy</button>
-              <button @click="handleSaveAssign" class="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-bold hover:bg-emerald-700 shadow-sm flex items-center gap-2">
-                <LinkIcon class="w-4 h-4"/> Lưu Gán hàng
-              </button>
-            </div>
           </div>
         </div>
       </div>

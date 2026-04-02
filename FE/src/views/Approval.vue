@@ -1,265 +1,177 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { 
-  MagnifyingGlassIcon, FunnelIcon, ArrowPathIcon, EyeIcon, 
-  CheckCircleIcon, XCircleIcon, ClockIcon, DocumentTextIcon,
-  ChevronLeftIcon, ChevronRightIcon, XMarkIcon
+  MagnifyingGlassIcon, CheckCircleIcon, XCircleIcon, 
+  EyeIcon, XMarkIcon, ArrowDownTrayIcon, ArrowUpTrayIcon
 } from '@heroicons/vue/24/outline'
 
-// API Tương lai
-const API_URL = 'https://localhost:7139/api/Approvals'
+const INBOUND_API = 'https://localhost:7139/api/Inbound'
+const OUTBOUND_API = 'https://localhost:7139/api/Outbound'
 
-const isLoading = ref(false)
-const searchQuery = ref('')
-const filterType = ref('')
-const activeTab = ref('PENDING') // PENDING, APPROVED, REJECTED
+const getAuthHeaders = () => ({ 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (localStorage.getItem('authToken') || '') })
 
-const currentPage = ref(1)
-const itemsPerPage = 8
-const isModalOpen = ref(false)
-const selectedDoc = ref(null)
+const processReceipts = ref([]); const isLoading = ref(false); const activeTab = ref('inbound') 
 
-// --- DỮ LIỆU MẪU (MOCK DATA) ---
-const mockData = ref([
-  { id: 'PO-202603-001', type: 'PURCHASE_ORDER', typeName: 'Đơn đặt hàng (PO)', submitter: 'Nguyễn Văn A (Kho NV)', date: '2026-03-31T08:30:00', totalValue: '150,000,000 đ', status: 'PENDING', note: 'Nhập hàng đợt 1 tháng 4' },
-  { id: 'TR-202603-042', type: 'TRANSFER', typeName: 'Điều chuyển kho', submitter: 'Trần Thị B (Kho TT)', date: '2026-03-31T09:15:00', totalValue: '500 SP', status: 'PENDING', note: 'Chuyển hàng từ Tổng về Chi nhánh 1' },
-  { id: 'IN-202603-088', type: 'INBOUND', typeName: 'Phiếu Nhập Kho', submitter: 'Lê Văn C (Kho TT)', date: '2026-03-31T10:00:00', totalValue: '1,200 SP', status: 'PENDING', note: 'Nhập lô hàng linh kiện điện tử' },
-  { id: 'PO-202603-002', type: 'PURCHASE_ORDER', typeName: 'Đơn đặt hàng (PO)', submitter: 'Nguyễn Văn A', date: '2026-03-30T14:20:00', totalValue: '45,000,000 đ', status: 'APPROVED', note: 'Bổ sung văn phòng phẩm' },
-  { id: 'OUT-202603-105', type: 'OUTBOUND', typeName: 'Phiếu Xuất Kho', submitter: 'Trần Thị B', date: '2026-03-30T16:45:00', totalValue: '200 SP', status: 'REJECTED', note: 'Xuất hàng cho đối tác XYZ (Sai số lượng)' },
-])
-
-const stats = computed(() => {
-  return {
-    pending: mockData.value.filter(x => x.status === 'PENDING').length,
-    approved: mockData.value.filter(x => x.status === 'APPROVED').length,
-    rejected: mockData.value.filter(x => x.status === 'REJECTED').length
-  }
-})
-
-const fetchApprovals = async () => {
+const fetchData = async () => {
   isLoading.value = true
-  setTimeout(() => { isLoading.value = false }, 500)
+  try {
+    const headers = getAuthHeaders()
+    const [inbRes, outRes] = await Promise.all([ fetch(INBOUND_API, { headers }), fetch(OUTBOUND_API, { headers }) ])
+    let inbData = [], outData = []
+    
+    if (inbRes.ok) { const text = await inbRes.text(); inbData = text ? JSON.parse(text) : []; }
+    if (outRes.ok) { const text = await outRes.text(); outData = text ? JSON.parse(text) : []; }
+    
+    const mappedInbound = inbData.map(r => ({ 
+      ...r, id: r.id || r.Id, code: r.code || r.Code, status: r.status || r.Status,
+      date: r.date || r.Date, totalQty: r.totalQty || r.TotalQty, totalPrice: r.totalPrice || r.TotalPrice,
+      type: 'inbound', typeName: 'Nhập Kho', partnerName: r.supplierName || r.SupplierName || 'Khách vãng lai'
+    }))
+
+    const mappedOutbound = outData.map(r => ({ 
+      ...r, id: r.id || r.Id, code: r.code || r.Code, status: r.status || r.Status,
+      date: r.date || r.Date, totalQty: r.totalQty || r.TotalQty, totalPrice: r.totalPrice || r.TotalPrice,
+      type: 'outbound', typeName: 'Xuất Kho', partnerName: r.customerName || r.CustomerName || 'Khách vãng lai'
+    }))
+    
+    processReceipts.value = [...mappedInbound, ...mappedOutbound]
+
+  } catch (error) { console.error('Lỗi tải dữ liệu:', error) }
+  finally { isLoading.value = false }
 }
 
-// --- LOGIC LỌC & PHÂN TRANG ---
-const filteredDocs = computed(() => {
-  let result = mockData.value.filter(x => x.status === activeTab.value)
-  
-  if (searchQuery.value) {
-    const q = searchQuery.value.toLowerCase()
-    result = result.filter(doc => 
-      doc.id.toLowerCase().includes(q) || 
-      doc.submitter.toLowerCase().includes(q)
-    )
-  }
-  if (filterType.value) {
-    result = result.filter(doc => doc.type === filterType.value)
-  }
-  currentPage.value = 1 
-  return result
+const searchQuery = ref('')
+const filteredReceipts = computed(() => {
+  return processReceipts.value.filter(r => {
+    const matchSearch = (r.code || '').toLowerCase().includes(searchQuery.value.toLowerCase()) || 
+                        (r.partnerName || '').toLowerCase().includes(searchQuery.value.toLowerCase())
+    return matchSearch && r.type === activeTab.value
+  })
 })
 
-const totalPages = computed(() => Math.ceil(filteredDocs.value.length / itemsPerPage))
-const paginatedDocs = computed(() => filteredDocs.value.slice((currentPage.value - 1) * itemsPerPage, currentPage.value * itemsPerPage))
+const showModal = ref(false); const selectedReceipt = ref(null)
 
-const changePage = (page) => {
-  if (page >= 1 && page <= totalPages.value) currentPage.value = page
+const openModal = (receipt) => {
+  const safeItems = (receipt.items || receipt.Items || []).map(i => ({
+    sku: i.sku || i.Sku, name: i.name || i.Name, qty: i.qty || i.Qty, price: i.price || i.Price, 
+    locationCode: i.locationCode || i.LocationCode, nsx: i.nsx || i.Nsx || '', hsd: i.hsd || i.Hsd || ''
+  }));
+  selectedReceipt.value = { ...receipt, items: safeItems }; showModal.value = true
 }
 
-// --- THAO TÁC DUYỆT / TỪ CHỐI ---
-const approveDoc = (id) => {
-  if(confirm(`Bạn có chắc chắn muốn DUYỆT phiếu ${id} không?`)) {
-    const index = mockData.value.findIndex(x => x.id === id)
-    if(index !== -1) mockData.value[index].status = 'APPROVED'
-  }
-}
+const closeModal = () => { showModal.value = false; selectedReceipt.value = null }
+const formatCurrency = (val) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(val || 0)
 
-const rejectDoc = (id) => {
-  const reason = prompt(`Nhập lý do TỪ CHỐI phiếu ${id}:`)
-  if(reason !== null) {
-    const index = mockData.value.findIndex(x => x.id === id)
-    if(index !== -1) {
-      mockData.value[index].status = 'REJECTED'
-      mockData.value[index].note = reason // Lưu lý do vào note
+const handleAction = async (action, receipt) => {
+  let msg = action === 'approve' ? `DUYỆT chứng từ [${receipt.code}]?` : `TỪ CHỐI (Bỏ phiếu) [${receipt.code}]?`;
+  if (!confirm(msg)) return;
+  try {
+    const API_URL = receipt.type === 'inbound' ? INBOUND_API : OUTBOUND_API;
+    const res = await fetch(`${API_URL}/${receipt.id}/${action}`, { method: 'PUT', headers: getAuthHeaders() })
+    if (res.ok) { 
+        alert('Xử lý thành công!'); 
+        if (showModal.value) closeModal(); 
+        await fetchData(); 
+    } 
+    else { 
+        let errMsg = "Lỗi hệ thống không xác định!";
+        try { const text = await res.text(); if (text) { const err = JSON.parse(text); errMsg = err.message || errMsg; } } catch(e) {}
+        alert('LỖI HỆ THỐNG: ' + errMsg);
     }
+  } catch(e) { console.error(e) }
+}
+
+const getStatusBadge = (status) => {
+  switch(status) {
+    case 'pending': return { text: 'Cần Duyệt', class: 'bg-amber-100 text-amber-700 border-amber-200 animate-pulse' }
+    case 'approved': return { text: 'Đã Duyệt', class: 'bg-blue-100 text-blue-700 border-blue-200' }
+    case 'completed': return { text: 'Hoàn Thành', class: 'bg-emerald-100 text-emerald-700 border-emerald-200' }
+    case 'rejected': return { text: 'Đã Hủy', class: 'bg-red-100 text-red-700 border-red-200' }
+    default: return { text: 'Khác', class: 'bg-gray-100 text-gray-500' }
   }
 }
 
-const viewDetails = (doc) => {
-  selectedDoc.value = doc
-  isModalOpen.value = true
-}
-
-const formatDateTime = (dateString) => {
-  const date = new Date(dateString)
-  return new Intl.DateTimeFormat('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(date)
-}
-
-onMounted(() => fetchApprovals())
+onMounted(() => fetchData())
 </script>
 
 <template>
-  <div class="space-y-5 md:space-y-6 animate-fade-in pb-10 px-0 md:px-1 relative">
-    
-    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+  <div class="space-y-6 animate-fade-in pb-10 px-1 relative">
+    <div class="flex justify-between items-center">
       <div>
-        <h2 class="text-xl md:text-2xl font-bold text-gray-800 flex items-center gap-2">
-          <CheckCircleIcon class="w-7 h-7 text-primary-600" /> Trung tâm Duyệt phiếu
-        </h2>
-        <p class="text-xs md:text-sm text-gray-500 mt-1">Nơi phê duyệt tập trung tất cả các yêu cầu từ các bộ phận</p>
+        <h2 class="text-2xl font-bold text-gray-800">Duyệt Phiếu Tổng</h2>
+        <p class="text-sm text-gray-500 mt-1">Nơi Quản lý/Giám đốc kiểm tra và Phê duyệt các chứng từ.</p>
       </div>
-      <button @click="fetchApprovals" class="bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 px-4 py-2 h-10 rounded-lg flex items-center gap-2 text-sm font-medium transition-colors shadow-sm">
-        <ArrowPathIcon class="w-5 h-5" :class="{'animate-spin': isLoading}"/> Tải lại
-      </button>
+      <button @click="fetchData" class="bg-white border border-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-semibold hover:bg-gray-50 transition-colors shadow-sm">Làm mới dữ liệu</button>
     </div>
 
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-      <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-center gap-4 border-l-4 border-l-amber-400">
-        <div class="p-3 bg-amber-50 text-amber-600 rounded-full"><ClockIcon class="w-6 h-6"/></div>
-        <div>
-          <p class="text-sm font-medium text-gray-500">Đang chờ duyệt</p>
-          <p class="text-2xl font-bold text-gray-800">{{ stats.pending }} <span class="text-sm font-normal text-gray-500">phiếu</span></p>
-        </div>
+    <div class="bg-white rounded-xl border flex gap-4 p-2 shadow-sm items-center">
+      <div class="flex bg-gray-100 rounded-lg">
+        <button @click="activeTab = 'inbound'" :class="['px-6 py-2 text-sm font-bold rounded-md flex items-center gap-1.5', activeTab === 'inbound' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500']"><ArrowDownTrayIcon class="w-4 h-4"/> Nhập Kho</button>
+        <button @click="activeTab = 'outbound'" :class="['px-6 py-2 text-sm font-bold rounded-md flex items-center gap-1.5', activeTab === 'outbound' ? 'bg-white text-amber-700 shadow-sm' : 'text-gray-500']"><ArrowUpTrayIcon class="w-4 h-4"/> Xuất Kho</button>
       </div>
-      <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-center gap-4 border-l-4 border-l-green-500">
-        <div class="p-3 bg-green-50 text-green-600 rounded-full"><CheckCircleIcon class="w-6 h-6"/></div>
-        <div>
-          <p class="text-sm font-medium text-gray-500">Đã phê duyệt</p>
-          <p class="text-2xl font-bold text-gray-800">{{ stats.approved }}</p>
-        </div>
-      </div>
-      <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-center gap-4 border-l-4 border-l-red-500">
-        <div class="p-3 bg-red-50 text-red-600 rounded-full"><XCircleIcon class="w-6 h-6"/></div>
-        <div>
-          <p class="text-sm font-medium text-gray-500">Đã từ chối</p>
-          <p class="text-2xl font-bold text-gray-800">{{ stats.rejected }}</p>
-        </div>
+      <div class="relative flex-1">
+        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><MagnifyingGlassIcon class="w-5 h-5 text-gray-400" /></div>
+        <input v-model="searchQuery" type="text" class="block w-full pl-10 pr-3 py-2 border rounded-lg text-sm outline-none focus:ring-1 focus:ring-primary-500" placeholder="Tìm kiếm mã phiếu, đối tác...">
       </div>
     </div>
 
-    <div class="bg-white p-2 rounded-xl border border-gray-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
-      <div class="flex p-1 bg-gray-100 rounded-lg w-full md:w-auto">
-        <button @click="activeTab = 'PENDING'" :class="['flex-1 md:flex-none px-4 py-2 text-sm font-medium rounded-md transition-all', activeTab === 'PENDING' ? 'bg-white text-amber-600 shadow' : 'text-gray-500 hover:text-gray-700']">
-          Chờ duyệt ({{ stats.pending }})
-        </button>
-        <button @click="activeTab = 'APPROVED'" :class="['flex-1 md:flex-none px-4 py-2 text-sm font-medium rounded-md transition-all', activeTab === 'APPROVED' ? 'bg-white text-green-600 shadow' : 'text-gray-500 hover:text-gray-700']">
-          Đã duyệt
-        </button>
-        <button @click="activeTab = 'REJECTED'" :class="['flex-1 md:flex-none px-4 py-2 text-sm font-medium rounded-md transition-all', activeTab === 'REJECTED' ? 'bg-white text-red-600 shadow' : 'text-gray-500 hover:text-gray-700']">
-          Từ chối
-        </button>
-      </div>
-
-      <div class="flex gap-2 w-full md:w-auto px-1 md:px-0 pb-1 md:pb-0">
-        <div class="relative flex-1 md:w-64">
-          <MagnifyingGlassIcon class="absolute inset-y-0 left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input v-model="searchQuery" type="text" class="w-full h-9 pl-9 pr-3 border border-gray-200 rounded-lg text-sm focus:ring-1 focus:ring-blue-500 outline-none" placeholder="Tìm mã phiếu, người tạo...">
-        </div>
-        <select v-model="filterType" class="h-9 border border-gray-200 rounded-lg text-sm px-2 focus:ring-1 focus:ring-blue-500 outline-none bg-white">
-          <option value="">Loại phiếu</option>
-          <option value="PURCHASE_ORDER">Đặt hàng (PO)</option>
-          <option value="INBOUND">Phiếu Nhập</option>
-          <option value="OUTBOUND">Phiếu Xuất</option>
-          <option value="TRANSFER">Điều chuyển</option>
-        </select>
-      </div>
+    <div class="bg-white rounded-xl border shadow-sm overflow-hidden">
+      <table class="w-full text-sm text-left">
+        <thead class="bg-gray-50 uppercase font-bold text-gray-500">
+          <tr><th class="px-5 py-3">Mã Phiếu</th><th class="px-5 py-3">Ngày</th><th class="px-5 py-3">Đối tác</th><th class="px-5 py-3 text-center">Trạng Thái</th><th class="px-5 py-3 text-right">Thao tác</th></tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+          <tr v-if="filteredReceipts.length === 0"><td colspan="5" class="px-6 py-12 text-center text-gray-500">Không có dữ liệu.</td></tr>
+          <tr v-for="receipt in filteredReceipts" :key="receipt.id" class="hover:bg-slate-50">
+            <td class="px-5 py-3 font-bold text-slate-800">{{ receipt.code }}</td><td class="px-5 py-3">{{ receipt.date }}</td><td class="px-5 py-3 font-bold">{{ receipt.partnerName }}</td>
+            <td class="px-5 py-3 text-center"><span :class="['px-2 py-1 rounded text-[10px] font-bold uppercase border', getStatusBadge(receipt.status).class]">{{ getStatusBadge(receipt.status).text }}</span></td>
+            <td class="px-5 py-3 text-right space-x-1.5">
+              <button @click="openModal(receipt)" class="p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Xem chi tiết"><EyeIcon class="w-5 h-5" /></button>
+              
+              <template v-if="receipt.status === 'pending'">
+                <button @click="handleAction('approve', receipt)" class="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded transition-colors" title="Phê duyệt phiếu"><CheckCircleIcon class="w-5 h-5" /></button>
+                <button @click="handleAction('reject', receipt)" class="p-1.5 text-red-600 hover:bg-red-50 rounded transition-colors" title="Từ chối (Hủy phiếu)"><XCircleIcon class="w-5 h-5" /></button>
+              </template>
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </div>
 
-    <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col">
-      <div class="w-full overflow-x-auto custom-scrollbar flex-1">
-        <table class="min-w-[1000px] w-full divide-y divide-gray-200">
-          <thead class="bg-gray-50">
-            <tr>
-              <th class="px-5 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-[12%]">Mã phiếu</th>
-              <th class="px-5 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-[15%]">Loại chứng từ</th>
-              <th class="px-5 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-[18%]">Người yêu cầu</th>
-              <th class="px-5 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-[15%]">Ngày tạo</th>
-              <th class="px-5 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-[12%]">Giá trị/SL</th>
-              <th class="px-5 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-[18%]">Ghi chú</th>
-              <th class="px-5 py-4 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider w-[10%]">Thao tác</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-gray-100 bg-white">
-            <tr v-if="paginatedDocs.length === 0">
-              <td colspan="7" class="px-6 py-16 text-center">
-                <DocumentTextIcon class="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                <h3 class="text-base font-medium text-gray-900">Không có dữ liệu</h3>
-                <p class="text-sm text-gray-500 mt-1">Không tìm thấy phiếu nào trong mục này.</p>
-              </td>
-            </tr>
-            
-            <tr v-else v-for="doc in paginatedDocs" :key="doc.id" class="hover:bg-gray-50/50 transition-colors">
-              <td class="px-5 py-4 text-sm font-bold text-blue-600 cursor-pointer hover:underline" @click="viewDetails(doc)">{{ doc.id }}</td>
-              <td class="px-5 py-4 text-sm font-medium text-gray-800">
-                <span class="bg-gray-100 text-gray-700 px-2 py-1 rounded text-xs">{{ doc.typeName }}</span>
-              </td>
-              <td class="px-5 py-4 text-sm text-gray-700">{{ doc.submitter }}</td>
-              <td class="px-5 py-4 text-sm text-gray-500">{{ formatDateTime(doc.date) }}</td>
-              <td class="px-5 py-4 text-sm font-semibold text-gray-800">{{ doc.totalValue }}</td>
-              <td class="px-5 py-4 text-sm text-gray-500 truncate max-w-[150px]" :title="doc.note">{{ doc.note }}</td>
-              <td class="px-5 py-4 text-center flex items-center justify-center gap-2">
-                <template v-if="activeTab === 'PENDING'">
-                  <button @click="approveDoc(doc.id)" title="Duyệt" class="text-green-600 hover:text-green-800 bg-green-50 hover:bg-green-100 p-1.5 rounded-md transition-colors">
-                    <CheckCircleIcon class="w-5 h-5" />
-                  </button>
-                  <button @click="rejectDoc(doc.id)" title="Từ chối" class="text-red-600 hover:text-red-800 bg-red-50 hover:bg-red-100 p-1.5 rounded-md transition-colors">
-                    <XCircleIcon class="w-5 h-5" />
-                  </button>
-                </template>
-                <button @click="viewDetails(doc)" title="Xem chi tiết" class="text-gray-500 hover:text-blue-600 bg-gray-50 hover:bg-blue-50 p-1.5 rounded-md transition-colors">
-                  <EyeIcon class="w-5 h-5" />
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+    <Teleport to="body">
+      <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-5xl flex flex-col max-h-[90vh]">
+          <div class="px-6 py-4 border-b flex justify-between bg-slate-50"><h3 class="font-bold text-lg"><EyeIcon class="w-6 h-6 inline text-blue-500 mr-1"/> Chi tiết Phiếu: {{ selectedReceipt.code }}</h3><button @click="closeModal" class="text-gray-400 hover:text-red-500"><XMarkIcon class="w-6 h-6" /></button></div>
+          <div class="p-6 overflow-y-auto flex-1 space-y-6">
+            <div class="grid grid-cols-4 gap-4 bg-slate-50 p-4 rounded-lg border">
+              <div><p class="text-xs font-bold text-gray-500 uppercase">Đối tác</p><p class="text-sm font-bold text-gray-900 mt-1">{{ selectedReceipt.partnerName }}</p></div>
+              <div><p class="text-xs font-bold text-gray-500 uppercase">Ngày lập</p><p class="text-sm font-bold text-gray-900 mt-1">{{ selectedReceipt.date }}</p></div>
+              <div><p class="text-xs font-bold text-gray-500 uppercase">Loại chứng từ</p><p class="text-sm font-bold text-blue-600 mt-1">{{ selectedReceipt.typeName }}</p></div>
+              <div><p class="text-xs font-bold text-gray-500 uppercase">Trạng thái</p><p class="text-sm font-bold text-amber-600 mt-1">{{ getStatusBadge(selectedReceipt.status).text }}</p></div>
+            </div>
 
-      <div v-if="filteredDocs.length > 0" class="border-t border-gray-200 bg-gray-50 px-5 py-3 flex justify-between items-center">
-        <span class="text-sm text-gray-600">Trang {{ currentPage }} / {{ totalPages || 1 }}</span>
-        <div class="flex gap-2">
-          <button @click="changePage(currentPage - 1)" :disabled="currentPage === 1" class="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border rounded hover:bg-gray-50 disabled:opacity-50 flex items-center">
-            <ChevronLeftIcon class="w-4 h-4" />
-          </button>
-          <button @click="changePage(currentPage + 1)" :disabled="currentPage === totalPages" class="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border rounded hover:bg-gray-50 disabled:opacity-50 flex items-center">
-            <ChevronRightIcon class="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <div v-if="isModalOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/50 backdrop-blur-sm" @click.self="isModalOpen = false">
-      <div class="bg-white rounded-xl shadow-xl w-full max-w-2xl mx-4 overflow-hidden animate-slide-up">
-        <div class="px-6 py-4 border-b flex justify-between items-center bg-gray-50">
-          <h3 class="font-bold text-gray-800">Chi tiết chứng từ: <span class="text-blue-600">{{ selectedDoc?.id }}</span></h3>
-          <button @click="isModalOpen = false" class="p-1 hover:bg-gray-200 rounded-full"><XMarkIcon class="w-5 h-5"/></button>
-        </div>
-        <div class="p-6">
-          <div class="grid grid-cols-2 gap-4 mb-4">
-            <div><p class="text-xs text-gray-500">Loại chứng từ</p><p class="font-medium">{{ selectedDoc?.typeName }}</p></div>
-            <div><p class="text-xs text-gray-500">Người yêu cầu</p><p class="font-medium">{{ selectedDoc?.submitter }}</p></div>
-            <div><p class="text-xs text-gray-500">Ngày tạo</p><p class="font-medium">{{ selectedDoc ? formatDateTime(selectedDoc.date) : '' }}</p></div>
-            <div><p class="text-xs text-gray-500">Giá trị / Số lượng</p><p class="font-medium text-purple-600">{{ selectedDoc?.totalValue }}</p></div>
+            <table class="w-full text-sm text-left border">
+              <thead class="bg-gray-100 uppercase font-bold text-xs border-b">
+                <tr><th class="px-4 py-3">SKU</th><th class="px-4 py-3">Tên</th><th class="px-4 py-3">Vị trí Kệ</th><th v-if="selectedReceipt.type==='inbound'" class="px-4 py-3">NSX-HSD</th><th class="px-4 py-3 text-right">SL</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="(item, idx) in selectedReceipt.items" :key="idx" class="border-b">
+                  <td class="px-4 py-2 font-bold">{{item.sku}}</td><td class="px-4 py-2">{{item.name}}</td><td class="px-4 py-2 font-bold text-indigo-600">{{item.locationCode || 'Kho chung'}}</td>
+                  <td v-if="selectedReceipt.type==='inbound'" class="px-4 py-2 text-xs text-gray-500">{{item.nsx}} <br> {{item.hsd}}</td>
+                  <td class="px-4 py-2 text-right font-bold text-blue-700">{{item.qty}}</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
-          <div><p class="text-xs text-gray-500">Ghi chú</p><p class="bg-gray-50 p-2 rounded border mt-1 text-sm">{{ selectedDoc?.note || 'Không có ghi chú' }}</p></div>
-          
-          <div class="mt-6 flex justify-end gap-3 pt-4 border-t">
-            <button @click="isModalOpen = false" class="px-4 py-2 border rounded-lg text-sm font-medium hover:bg-gray-50">Đóng</button>
-            <template v-if="selectedDoc?.status === 'PENDING'">
-              <button @click="rejectDoc(selectedDoc.id); isModalOpen=false" class="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700">Từ chối</button>
-              <button @click="approveDoc(selectedDoc.id); isModalOpen=false" class="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700">Phê duyệt</button>
+          <div class="px-6 py-4 border-t flex justify-end gap-3 bg-gray-50">
+            <button @click="closeModal" class="px-6 py-2.5 border rounded-lg font-bold hover:bg-gray-100 transition-colors">Đóng lại</button>
+            <template v-if="selectedReceipt.status === 'pending'">
+              <button @click="handleAction('reject', selectedReceipt)" class="px-6 py-2.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg font-bold shadow-sm transition-colors">Từ chối</button>
+              <button @click="handleAction('approve', selectedReceipt)" class="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold shadow-sm transition-colors">Phê Duyệt</button>
             </template>
           </div>
         </div>
       </div>
-    </div>
-
+    </Teleport>
   </div>
 </template>
-
-<style scoped>
-.custom-scrollbar::-webkit-scrollbar { height: 6px; width: 6px; }
-.custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-.animate-slide-up { animation: slideUp 0.2s ease-out; }
-@keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-</style>

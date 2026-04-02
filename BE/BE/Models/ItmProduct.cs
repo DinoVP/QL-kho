@@ -16,6 +16,8 @@ public partial class ItmProduct
     public int? TaxId { get; set; }
 
     public string? Sku { get; set; }
+    public string? PackSize { get; set; }
+    public decimal? Weight { get; set; }
 
     public string? ProductName { get; set; }
 

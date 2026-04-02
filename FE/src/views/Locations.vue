@@ -1,128 +1,141 @@
 <script setup>
-import { ref, computed } from 'vue'
-import { 
-  MagnifyingGlassIcon, PlusIcon, PencilSquareIcon, 
-  TrashIcon, MapPinIcon, XMarkIcon, AdjustmentsVerticalIcon
-} from '@heroicons/vue/24/outline'
+import { ref, computed, onMounted } from 'vue'
+import { MagnifyingGlassIcon, PlusIcon, MapPinIcon, XMarkIcon, QrCodeIcon, CubeIcon, ScaleIcon, PencilSquareIcon, TrashIcon, AdjustmentsHorizontalIcon } from '@heroicons/vue/24/outline'
 
-// === 1. STATE CHÍNH: TRỐNG CHỜ API ===
+const API_URL = 'https://localhost:7139/api/Locations'
+const PROD_API_URL = 'https://localhost:7139/api/Products'
+
+const getAuthHeaders = () => ({
+  'Content-Type': 'application/json',
+  'Authorization': 'Bearer ' + (localStorage.getItem('authToken') || '')
+})
+
 const locations = ref([])
+const productsList = ref([])
+const isLoading = ref(false)
 
-// === 2. BỘ LỌC TÌM KIẾM ===
+const fetchData = async () => {
+  isLoading.value = true
+  try {
+    const headers = getAuthHeaders()
+    const [locRes, prodRes] = await Promise.all([
+      fetch(API_URL, { headers }),
+      fetch(PROD_API_URL, { headers })
+    ])
+    if (prodRes.ok) productsList.value = await prodRes.json()
+    if (locRes.ok) locations.value = await locRes.json()
+  } catch (error) { console.error('Lỗi tải dữ liệu:', error) }
+  finally { isLoading.value = false }
+}
+
 const searchQuery = ref('')
-const filterWarehouse = ref('')
 const filterStatus = ref('')
 
 const filteredLocations = computed(() => {
   return locations.value.filter(loc => {
-    const matchSearch = loc.code.toLowerCase().includes(searchQuery.value.toLowerCase()) || 
-                        loc.zone.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
-                        loc.rack.toLowerCase().includes(searchQuery.value.toLowerCase())
-    const matchWarehouse = filterWarehouse.value === '' || loc.warehouse.includes(filterWarehouse.value)
+    const matchSearch = (loc.code || '').toLowerCase().includes(searchQuery.value.toLowerCase())
     const matchStatus = filterStatus.value === '' || loc.status === filterStatus.value
-    
-    return matchSearch && matchWarehouse && matchStatus
-  }).sort((a, b) => a.id - b.id)
+    return matchSearch && matchStatus
+  })
 })
 
-// === 3. LOGIC MODAL TẠO / SỬA VỊ TRÍ ===
-const showModal = ref(false)
-const modalMode = ref('add') 
-
-const formData = ref({ 
-  id: null, code: '', warehouse: 'Tổng kho Miền Bắc', zone: '', rack: '', 
-  tier: 1, bin: 1, type: 'Tiêu chuẩn', capacity: 100, currentQty: 0, status: 'empty' 
-})
-
-const generateCode = () => {
-  const whPrefix = formData.value.warehouse === 'Tổng kho Miền Bắc' ? 'HN' : (formData.value.warehouse === 'Chi nhánh Miền Nam' ? 'HCM' : 'DN')
-  const zoneStr = formData.value.zone ? formData.value.zone.replace('Dãy ', '') : 'X'
-  const rackStr = formData.value.rack ? formData.value.rack.replace('Kệ ', '') : '00'
-  return `${whPrefix}-${zoneStr}-${rackStr}-T${formData.value.tier}-O${formData.value.bin}`
+// === LOGIC TÍNH TOÁN CÂN NẶNG & THANH TIẾN ĐỘ ===
+const calculateTotalWeight = (variantIds) => {
+  if (!variantIds || variantIds.length === 0) return 0;
+  let total = 0;
+  variantIds.forEach(id => {
+    const p = productsList.value.find(x => x.id === id);
+    if (p && p.weight) total += p.weight;
+  })
+  return total; 
 }
 
-const openModal = (mode, loc = null) => {
-  modalMode.value = mode
-  if (loc) {
-    formData.value = { ...loc } 
-  } else {
-    formData.value = { id: null, code: '', warehouse: 'Tổng kho Miền Bắc', zone: 'Dãy A', rack: 'Kệ 01', tier: 1, bin: 1, type: 'Tiêu chuẩn', capacity: 100, currentQty: 0, status: 'empty' }
-    formData.value.code = generateCode()
-  }
-  showModal.value = true
+const getWeightPercent = (current, max) => {
+  if (!max || max === 0) return 0;
+  const pct = (current / max) * 100;
+  return pct > 100 ? 100 : pct;
 }
 
-const closeModal = () => showModal.value = false
-
-const updateAutoCode = () => {
-  if (modalMode.value === 'add') formData.value.code = generateCode()
+const getWeightColor = (current, max) => {
+  const pct = (current / max) * 100;
+  if (pct < 60) return 'bg-emerald-500';
+  if (pct < 90) return 'bg-amber-500';
+  return 'bg-red-600 shadow-[0_0_8px_rgba(220,38,38,0.7)]'; // Màu đỏ phát sáng khi quá tải
 }
 
 const getStatusBadge = (status) => {
   switch(status) {
-    case 'empty': return { text: 'Trống (Trống)', class: 'bg-gray-100 text-gray-700 border-gray-300' }
-    case 'partial': return { text: 'Đang chứa', class: 'bg-blue-100 text-blue-700 border-blue-300' }
-    case 'full': return { text: 'Đầy (100%)', class: 'bg-red-100 text-red-700 border-red-300' }
-    case 'maintenance': return { text: 'Bảo trì / Khóa', class: 'bg-amber-100 text-amber-700 border-amber-300' }
+    case 'empty': return { text: 'Trống', class: 'bg-gray-100 text-gray-700 border-gray-300' }
+    case 'full': return { text: 'Có hàng', class: 'bg-indigo-100 text-indigo-700 border-indigo-300' }
     default: return { text: 'Khác', class: 'bg-gray-100 text-gray-500' }
   }
 }
 
-const getCapacityPercent = (current, max) => {
-  if (max === 0) return 0
-  const pct = Math.round((current / max) * 100)
-  return pct > 100 ? 100 : pct
+// === LOGIC MODAL SỬA VỊ TRÍ ===
+const showModal = ref(false)
+const formData = ref({ id: null, code: '', rack: '', maxWeight: 500 })
+
+const openModal = (loc) => {
+  // Gắn đúng dữ liệu của dòng đang chọn vào Form
+  formData.value = { 
+    id: loc.id, 
+    code: loc.code, 
+    rack: loc.rack, 
+    maxWeight: loc.maxWeight || 500 
+  }
+  showModal.value = true
 }
+const closeModal = () => showModal.value = false
 
-const getProgressBarColor = (pct) => {
-  if (pct === 0) return 'bg-gray-200'
-  if (pct < 80) return 'bg-blue-500'
-  if (pct < 100) return 'bg-amber-500'
-  return 'bg-red-500'
-}
-
-const handleSubmit = () => {
-  if (modalMode.value === 'add') {
-    if (formData.value.currentQty === 0) formData.value.status = 'empty'
-    else if (formData.value.currentQty >= formData.value.capacity) formData.value.status = 'full'
-    else formData.value.status = 'partial'
-
-    locations.value.push({ ...formData.value, id: Date.now() })
-    alert('Thêm Vị trí lưu kho thành công!')
-  } else {
-    const idx = locations.value.findIndex(l => l.id === formData.value.id)
-    if (idx !== -1) {
-      if (formData.value.currentQty === 0 && formData.value.status !== 'maintenance') formData.value.status = 'empty'
-      else if (formData.value.currentQty >= formData.value.capacity && formData.value.status !== 'maintenance') formData.value.status = 'full'
-      else if (formData.value.status !== 'maintenance') formData.value.status = 'partial'
-      
-      locations.value[idx] = { ...formData.value }
+const handleSubmit = async () => {
+  if (!formData.value.code) return;
+  try {
+    const res = await fetch(`${API_URL}/${formData.value.id}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ 
+        code: formData.value.code, 
+        rack: formData.value.rack,
+        maxWeight: formData.value.maxWeight 
+      })
+    })
+    if (res.ok) {
+      await fetchData();
+      closeModal();
+    } else {
+      const err = await res.json()
+      alert('Lỗi: ' + err.message)
     }
-    alert('Cập nhật Vị trí lưu kho thành công!')
-  }
-  closeModal()
+  } catch(e) { console.error(e) }
 }
 
-const handleDelete = (id, code) => {
-  if (confirm(`Sếp có chắc chắn muốn xóa Vị trí [${code}] không?`)) {
-    locations.value = locations.value.filter(l => l.id !== id)
+const handleDelete = async (id, code) => {
+  if (confirm(`Bạn có chắc chắn muốn XÓA vị trí [${code}] không?`)) {
+    try {
+      const res = await fetch(`${API_URL}/${id}`, { method: 'DELETE', headers: getAuthHeaders() })
+      if (res.ok) {
+        await fetchData();
+      } else {
+        const err = await res.json()
+        alert('KHÔNG THỂ XÓA: ' + err.message)
+      }
+    } catch(e) { console.error(e) }
   }
 }
+
+onMounted(() => { fetchData() })
 </script>
 
 <template>
   <div class="space-y-5 md:space-y-6 animate-fade-in pb-10 px-0 md:px-1 relative">
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
       <div>
-        <h2 class="text-xl md:text-2xl font-bold text-gray-800">Vị trí Lưu Kho (Bin Locations)</h2>
-        <p class="text-xs md:text-sm text-gray-500 mt-1">Danh sách chi tiết và thông số sức chứa của từng ô kệ trong kho</p>
+        <h2 class="text-xl md:text-2xl font-bold text-gray-800">Chi tiết Vị trí (Bin Locations)</h2>
+        <p class="text-xs md:text-sm text-gray-500 mt-1">Giám sát tải trọng thực tế của từng Vị trí Kệ hàng bằng <strong class="text-indigo-600">Thanh tiến độ (Progress)</strong></p>
       </div>
       <div class="flex gap-2">
         <button class="bg-white border border-gray-300 text-gray-700 px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-gray-50 transition-colors shadow-sm flex items-center gap-2">
-          <AdjustmentsVerticalIcon class="w-5 h-5"/> Sinh mã tự động
-        </button>
-        <button @click="openModal('add')" class="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2.5 rounded-lg flex items-center gap-2 text-sm font-semibold transition-colors shadow-sm">
-          <PlusIcon class="w-5 h-5" /> Thêm Vị Trí Mới
+          <QrCodeIcon class="w-5 h-5 text-indigo-600"/> In QR Code Kệ
         </button>
       </div>
     </div>
@@ -130,17 +143,11 @@ const handleDelete = (id, code) => {
     <div class="bg-white p-3 md:p-4 rounded-xl border border-gray-200 flex flex-col md:flex-row items-center gap-3 md:gap-4 shadow-sm">
       <div class="relative w-full md:flex-1">
         <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><MagnifyingGlassIcon class="w-5 h-5 text-gray-400" /></div>
-        <input v-model="searchQuery" type="text" class="block w-full pl-10 pr-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-1 focus:ring-slate-500" placeholder="Tìm theo mã vị trí, Dãy, Kệ...">
+        <input v-model="searchQuery" type="text" class="block w-full pl-10 pr-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-1 focus:ring-slate-500" placeholder="Tìm theo mã vị trí...">
       </div>
-      
-      <div class="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
-        <select v-model="filterWarehouse" class="w-full sm:w-auto border border-gray-200 rounded-lg text-sm px-4 py-2 outline-none focus:ring-1 focus:ring-slate-500 cursor-pointer">
-          <option value="">Tất cả Kho</option><option value="Miền Bắc">Tổng kho Miền Bắc</option><option value="Miền Nam">Chi nhánh Miền Nam</option><option value="Đà Nẵng">Trung tâm Đà Nẵng</option>
-        </select>
-        <select v-model="filterStatus" class="w-full sm:w-auto border border-gray-200 rounded-lg text-sm px-4 py-2 outline-none focus:ring-1 focus:ring-slate-500 cursor-pointer">
-          <option value="">Tất cả Trạng thái</option><option value="empty">Trống</option><option value="partial">Đang chứa</option><option value="full">Đầy (Full)</option><option value="maintenance">Bảo trì / Khóa</option>
-        </select>
-      </div>
+      <select v-model="filterStatus" class="w-full sm:w-auto border border-gray-200 rounded-lg text-sm px-4 py-2 outline-none cursor-pointer">
+        <option value="">Tất cả Trạng thái</option><option value="empty">Trống</option><option value="full">Có hàng</option>
+      </select>
     </div>
 
     <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
@@ -149,46 +156,61 @@ const handleDelete = (id, code) => {
           <thead class="bg-gray-50">
             <tr>
               <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Mã Vị Trí (Bin Code)</th>
-              <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Thuộc Kho</th>
-              <th class="px-5 py-3.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Tọa độ (Dãy-Kệ-Tầng-Ô)</th>
-              <th class="px-5 py-3.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Phân loại</th>
-              <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Sức chứa (Capacity)</th>
+              <th class="px-5 py-3.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Tọa độ chi tiết</th>
+              <th class="px-5 py-3.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Tình trạng chứa hàng</th>
+              <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider w-64">TỔNG TẢI TRỌNG (Tiến độ)</th>
               <th class="px-5 py-3.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Trạng thái</th>
               <th class="px-5 py-3.5 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">Thao tác</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-100 bg-white">
-            <tr v-if="filteredLocations.length === 0">
-              <td colspan="7" class="px-6 py-16 text-center">
+            <tr v-if="isLoading"><td colspan="6" class="px-6 py-12 text-center text-gray-500 font-medium">Đang tính toán tải trọng...</td></tr>
+            <tr v-else-if="filteredLocations.length === 0">
+              <td colspan="6" class="px-6 py-16 text-center">
                 <MapPinIcon class="w-12 h-12 text-gray-300 mx-auto mb-3" />
                 <h3 class="text-base font-semibold text-gray-700">Chưa có vị trí lưu kho nào</h3>
-                <p class="text-sm text-gray-500 mt-1">Hệ thống đang chờ API đổ dữ liệu vị trí.</p>
               </td>
             </tr>
             <tr v-for="loc in filteredLocations" :key="loc.id" class="hover:bg-gray-50">
-              <td class="px-5 py-3 text-sm font-bold text-slate-800 flex items-center gap-2"><MapPinIcon class="w-4 h-4 text-gray-400" />{{ loc.code }}</td>
-              <td class="px-5 py-3 text-sm font-medium text-gray-600">{{ loc.warehouse }}</td>
+              <td class="px-5 py-3">
+                <div class="text-sm font-bold text-indigo-700 flex items-center gap-2"><MapPinIcon class="w-4 h-4 text-indigo-500" />{{ loc.code }}</div>
+                <div class="text-[10px] text-gray-500 font-bold uppercase mt-1">{{ loc.zone }} - {{ loc.rack }}</div>
+              </td>
               <td class="px-5 py-3 text-center">
                 <div class="inline-flex gap-1">
-                  <span class="bg-gray-100 text-gray-700 px-2 py-0.5 rounded text-xs font-bold border border-gray-200">{{ loc.zone }}</span>
-                  <span class="bg-gray-100 text-gray-700 px-2 py-0.5 rounded text-xs font-bold border border-gray-200">{{ loc.rack }}</span>
-                  <span class="bg-gray-100 text-gray-700 px-2 py-0.5 rounded text-xs font-bold border border-gray-200">T{{ loc.tier }}</span>
+                  <span class="bg-gray-100 text-gray-700 px-2 py-0.5 rounded text-xs font-bold border border-gray-200">Tầng {{ loc.tier }}</span>
                   <span class="bg-gray-100 text-gray-700 px-2 py-0.5 rounded text-xs font-bold border border-gray-200">Ô {{ loc.bin }}</span>
                 </div>
               </td>
-              <td class="px-5 py-3 text-center"><span class="text-xs font-semibold px-2 py-1 rounded-full border border-gray-200 bg-white text-gray-600 shadow-sm">{{ loc.type }}</span></td>
-              <td class="px-5 py-3">
-                <div class="flex items-center gap-3">
-                  <div class="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden border border-gray-300">
-                    <div class="h-2.5 rounded-full" :class="getProgressBarColor(getCapacityPercent(loc.currentQty, loc.capacity))" :style="{ width: `${getCapacityPercent(loc.currentQty, loc.capacity)}%` }"></div>
-                  </div>
-                  <span class="text-xs font-bold text-gray-700 whitespace-nowrap w-16 text-right">{{ loc.currentQty }} / {{ loc.capacity }}</span>
+              <td class="px-5 py-3 text-center">
+                <div class="flex items-center justify-center gap-1 font-bold">
+                  <CubeIcon class="w-4 h-4 text-gray-400"/> 
+                  <span :class="loc.variantIds.length > 0 ? 'text-amber-600' : 'text-gray-400'">{{ loc.variantIds.length }} Sản phẩm</span>
                 </div>
               </td>
-              <td class="px-5 py-3 text-center"><span :class="['text-[10px] font-bold px-2.5 py-1 rounded border uppercase tracking-wider whitespace-nowrap', getStatusBadge(loc.status).class]">{{ getStatusBadge(loc.status).text }}</span></td>
+              
+              <td class="px-5 py-3">
+                <div class="flex flex-col w-full">
+                  <div class="flex justify-between text-[10px] font-bold text-gray-500 mb-1">
+                    <span :class="calculateTotalWeight(loc.variantIds) > loc.maxWeight ? 'text-red-600' : 'text-gray-700'">
+                      Đang chứa: {{ calculateTotalWeight(loc.variantIds).toFixed(1) }} kg
+                    </span>
+                    <span>Max: {{ loc.maxWeight }} kg</span>
+                  </div>
+                  <div class="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden border border-gray-300">
+                    <div class="h-2.5 rounded-full transition-all duration-500"
+                         :class="getWeightColor(calculateTotalWeight(loc.variantIds), loc.maxWeight)"
+                         :style="{ width: getWeightPercent(calculateTotalWeight(loc.variantIds), loc.maxWeight) + '%' }">
+                    </div>
+                  </div>
+                </div>
+              </td>
+
+              <td class="px-5 py-3 text-center"><span :class="['text-[10px] font-bold px-3 py-1 rounded-full border uppercase tracking-wider whitespace-nowrap', getStatusBadge(loc.status).class]">{{ getStatusBadge(loc.status).text }}</span></td>
+              
               <td class="px-5 py-3 text-right space-x-2 whitespace-nowrap">
-                <button @click="openModal('edit', loc)" class="p-1.5 text-amber-600 hover:bg-amber-50 rounded" title="Chỉnh sửa"><PencilSquareIcon class="w-5 h-5" /></button>
-                <button @click="handleDelete(loc.id, loc.code)" class="p-1.5 text-red-600 hover:bg-red-50 rounded" title="Xóa"><TrashIcon class="w-5 h-5" /></button>
+                <button @click="openModal(loc)" class="p-1.5 text-amber-600 hover:bg-amber-50 rounded border border-transparent hover:border-amber-200" title="Chỉnh sửa tải trọng / Tên mã"><PencilSquareIcon class="w-5 h-5" /></button>
+                <button @click="handleDelete(loc.id, loc.code)" class="p-1.5 text-red-600 hover:bg-red-50 rounded border border-transparent hover:border-red-200" title="Đập bỏ ô này"><TrashIcon class="w-5 h-5" /></button>
               </td>
             </tr>
           </tbody>
@@ -198,54 +220,41 @@ const handleDelete = (id, code) => {
 
     <Teleport to="body">
       <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center px-4 bg-slate-900/50 backdrop-blur-sm animate-fade-in">
-        <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
-          <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50 shrink-0">
-            <h3 class="text-lg font-bold text-gray-800 flex items-center gap-2"><MapPinIcon class="w-6 h-6 text-slate-800"/> {{ modalMode === 'add' ? 'Thêm Vị Trí Lưu Kho Mới' : `Cập nhật Vị Trí: ${formData.code}` }}</h3>
-            <button @click="closeModal" class="text-gray-400 hover:text-red-500"><XMarkIcon class="w-6 h-6" /></button>
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden">
+          <div class="px-5 py-4 border-b flex justify-between bg-gray-50">
+            <h3 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+              <AdjustmentsHorizontalIcon class="w-5 h-5"/> Chỉnh sửa Vị trí
+            </h3>
+            <button @click="closeModal" class="text-gray-400 hover:text-red-500"><XMarkIcon class="w-6 h-6"/></button>
           </div>
-          <div class="p-6 overflow-y-auto flex-1 custom-scrollbar">
-            <form @submit.prevent="handleSubmit" class="space-y-6">
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div><label class="block text-xs font-bold mb-1">Mã Vị Trí *</label><input v-model="formData.code" type="text" required class="w-full border rounded-lg px-3 py-2 text-sm font-bold text-slate-700"></div>
-                <div><label class="block text-xs font-bold mb-1">Thuộc Kho *</label>
-                  <select v-model="formData.warehouse" @change="updateAutoCode" required class="w-full border rounded-lg px-3 py-2 text-sm cursor-pointer">
-                    <option value="Tổng kho Miền Bắc">Tổng kho Miền Bắc</option><option value="Chi nhánh Miền Nam">Chi nhánh Miền Nam</option><option value="Trung tâm Đà Nẵng">Trung tâm Đà Nẵng</option>
-                  </select>
-                </div>
+          <div class="p-5">
+            <form @submit.prevent="handleSubmit" class="space-y-4">
+              <div>
+                <label class="block text-xs font-bold mb-1">Mã Vị Trí (Location Code)</label>
+                <input v-model="formData.code" required type="text" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm uppercase focus:ring-primary-500">
               </div>
-              <div class="bg-slate-50 p-4 rounded-lg border border-slate-200">
-                <h4 class="text-sm font-bold mb-3 border-b pb-2">Tọa độ vật lý</h4>
-                <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                  <div><label class="block text-xs font-bold mb-1">Dãy *</label><input v-model="formData.zone" @input="updateAutoCode" type="text" required class="w-full border rounded-lg px-3 py-2 text-sm"></div>
-                  <div><label class="block text-xs font-bold mb-1">Kệ *</label><input v-model="formData.rack" @input="updateAutoCode" type="text" required class="w-full border rounded-lg px-3 py-2 text-sm"></div>
-                  <div><label class="block text-xs font-bold mb-1">Tầng *</label><input v-model.number="formData.tier" @input="updateAutoCode" type="number" min="1" required class="w-full border rounded-lg px-3 py-2 text-sm text-center"></div>
-                  <div><label class="block text-xs font-bold mb-1">Ô *</label><input v-model.number="formData.bin" @input="updateAutoCode" type="number" min="1" required class="w-full border rounded-lg px-3 py-2 text-sm text-center"></div>
+              
+              <div class="mt-4">
+                <label class="block text-xs font-bold mb-1 text-indigo-700">Tải trọng tối đa của Kệ này (kg)</label>
+                <div class="relative">
+                  <input v-model.number="formData.maxWeight" required type="number" min="1" class="w-full border border-indigo-200 bg-indigo-50 rounded-lg pl-3 pr-8 py-2 text-sm focus:ring-indigo-500">
+                  <div class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-xs text-gray-500 font-bold">kg</div>
                 </div>
+                <p class="text-[10px] text-gray-500 mt-1 italic">Dùng để tính thanh tiến độ (Progress Bar).</p>
               </div>
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div><label class="block text-xs font-bold mb-1">Phân loại vị trí *</label>
-                  <select v-model="formData.type" required class="w-full border rounded-lg px-3 py-2 text-sm cursor-pointer">
-                    <option>Tiêu chuẩn</option><option>Kho lạnh</option><option>Dễ cháy nổ</option><option>Hàng cồng kềnh</option>
-                  </select>
-                </div>
-                <div><label class="block text-xs font-bold mb-1">Sức chứa tối đa *</label><input v-model.number="formData.capacity" type="number" min="1" required class="w-full border rounded-lg px-3 py-2 text-sm"></div>
-              </div>
-              <div class="border-t pt-4">
-                <label class="block text-xs font-bold mb-2">Hiện trạng thực tế</label>
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
-                  <div><label class="block text-xs font-medium text-gray-500 mb-1">Số lượng đang chứa</label><input v-model.number="formData.currentQty" type="number" min="0" :max="formData.capacity" class="w-full border rounded-lg px-3 py-2 text-sm font-bold text-blue-700"></div>
-                  <div class="pt-4"><label class="flex items-center gap-2 cursor-pointer p-2 rounded border border-amber-200 bg-amber-50"><input type="checkbox" :checked="formData.status === 'maintenance'" @change="e => formData.status = e.target.checked ? 'maintenance' : 'empty'" class="w-4 h-4 text-amber-600 rounded"><span class="text-sm font-bold text-amber-700">Khóa để Bảo trì</span></label></div>
-                </div>
+
+              <div class="mt-6 pt-4 border-t flex justify-end gap-3">
+                <button type="button" @click="closeModal" class="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50 font-semibold">Hủy</button>
+                <button type="submit" class="px-4 py-2 bg-slate-800 text-white rounded-lg text-sm font-bold hover:bg-slate-900 shadow-sm flex items-center gap-2">
+                  <PencilSquareIcon class="w-4 h-4"/> Lưu Thay Đổi
+                </button>
               </div>
             </form>
-          </div>
-          <div class="px-6 py-4 border-t flex justify-end gap-3 bg-white shrink-0">
-            <button type="button" @click="closeModal" class="px-5 py-2.5 border rounded-lg text-sm font-semibold hover:bg-gray-50">Hủy bỏ</button>
-            <button type="submit" @click="handleSubmit" class="px-5 py-2.5 bg-slate-800 text-white rounded-lg text-sm font-bold hover:bg-slate-900 shadow-md"><MapPinIcon class="w-5 h-5 inline mr-1"/> Lưu</button>
           </div>
         </div>
       </div>
     </Teleport>
+
   </div>
 </template>
 
@@ -253,4 +262,6 @@ const handleDelete = (id, code) => {
 .custom-scrollbar::-webkit-scrollbar { height: 6px; width: 6px; }
 .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
 .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-</style>
+.animate-fade-in { animation: fadeIn 0.2s ease-out; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+</style>   
