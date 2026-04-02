@@ -767,6 +767,16 @@
     "ReturnTypes": []
   },
   {
+    "ContainingType": "BE.Controllers.StockController",
+    "Method": "GetStock",
+    "RelativePath": "api/Stock",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": []
+  },
+  {
     "ContainingType": "BE.Controllers.SysUiLogsController",
     "Method": "GetLogs",
     "RelativePath": "api/SysUiLogs",

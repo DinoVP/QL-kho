@@ -14,6 +14,8 @@ public partial class SalDeliveryLine
     public int? VariantId { get; set; }
     public decimal? Price { get; set; }
     public int? LocationId { get; set; }
+    public DateTime? Nsx { get; set; }
+    public DateTime? Hsd { get; set; }
 
     public virtual SalDelivery? Do { get; set; }
     public virtual SalOrderLine? Soline { get; set; }
