@@ -2,8 +2,9 @@
 import { ref, computed, onMounted } from 'vue'
 import { 
   MagnifyingGlassIcon, CheckCircleIcon, XCircleIcon, 
-  EyeIcon, XMarkIcon, ArrowDownTrayIcon, ArrowUpTrayIcon
-} from '@heroicons/vue/24/outline'
+  EyeIcon, XMarkIcon, ArrowDownTrayIcon, ArrowUpTrayIcon,
+  MapPinIcon
+} from '@heroicons/vue/24/outline' // Đã import MapPinIcon cho Tên Kho
 
 const INBOUND_API = 'https://localhost:7139/api/Inbound'
 const OUTBOUND_API = 'https://localhost:7139/api/Outbound'
@@ -25,13 +26,15 @@ const fetchData = async () => {
     const mappedInbound = inbData.map(r => ({ 
       ...r, id: r.id || r.Id, code: r.code || r.Code, status: r.status || r.Status,
       date: r.date || r.Date, totalQty: r.totalQty || r.TotalQty, totalPrice: r.totalPrice || r.TotalPrice,
-      type: 'inbound', typeName: 'Nhập Kho', partnerName: r.supplierName || r.SupplierName || 'Khách vãng lai'
+      type: 'inbound', typeName: 'Nhập Kho', partnerName: r.supplierName || r.SupplierName || 'Khách vãng lai',
+      warehouseName: r.warehouseName || r.WarehouseName || 'Kho Tổng (Chưa gán)' // Lấy tên Kho
     }))
 
     const mappedOutbound = outData.map(r => ({ 
       ...r, id: r.id || r.Id, code: r.code || r.Code, status: r.status || r.Status,
       date: r.date || r.Date, totalQty: r.totalQty || r.TotalQty, totalPrice: r.totalPrice || r.TotalPrice,
-      type: 'outbound', typeName: 'Xuất Kho', partnerName: r.customerName || r.CustomerName || 'Khách vãng lai'
+      type: 'outbound', typeName: 'Xuất Kho', partnerName: r.customerName || r.CustomerName || 'Khách vãng lai',
+      warehouseName: r.warehouseName || r.WarehouseName || 'Kho Tổng (Chưa gán)' // Lấy tên Kho
     }))
     
     processReceipts.value = [...mappedInbound, ...mappedOutbound]
@@ -117,13 +120,22 @@ onMounted(() => fetchData())
 
     <div class="bg-white rounded-xl border shadow-sm overflow-hidden">
       <table class="w-full text-sm text-left">
-        <thead class="bg-gray-50 uppercase font-bold text-gray-500">
-          <tr><th class="px-5 py-3">Mã Phiếu</th><th class="px-5 py-3">Ngày</th><th class="px-5 py-3">Đối tác</th><th class="px-5 py-3 text-center">Trạng Thái</th><th class="px-5 py-3 text-right">Thao tác</th></tr>
+        <thead class="bg-gray-50 uppercase font-bold text-gray-500 border-b">
+          <tr>
+            <th class="px-5 py-3">Mã Phiếu</th>
+            <th class="px-5 py-3 text-indigo-700">Tên Kho Gửi</th> <th class="px-5 py-3">Ngày</th>
+            <th class="px-5 py-3">Đối tác</th>
+            <th class="px-5 py-3 text-center">Trạng Thái</th>
+            <th class="px-5 py-3 text-right">Thao tác</th>
+          </tr>
         </thead>
         <tbody class="divide-y divide-gray-100">
-          <tr v-if="filteredReceipts.length === 0"><td colspan="5" class="px-6 py-12 text-center text-gray-500">Không có dữ liệu.</td></tr>
+          <tr v-if="filteredReceipts.length === 0"><td colspan="6" class="px-6 py-12 text-center text-gray-500">Không có dữ liệu.</td></tr>
           <tr v-for="receipt in filteredReceipts" :key="receipt.id" class="hover:bg-slate-50">
-            <td class="px-5 py-3 font-bold text-slate-800">{{ receipt.code }}</td><td class="px-5 py-3">{{ receipt.date }}</td><td class="px-5 py-3 font-bold">{{ receipt.partnerName }}</td>
+            <td class="px-5 py-3 font-bold text-slate-800">{{ receipt.code }}</td>
+            <td class="px-5 py-3 font-bold text-indigo-700"><MapPinIcon class="w-4 h-4 inline mr-1 text-indigo-500"/>{{ receipt.warehouseName }}</td>
+            <td class="px-5 py-3">{{ receipt.date }}</td>
+            <td class="px-5 py-3 font-bold">{{ receipt.partnerName }}</td>
             <td class="px-5 py-3 text-center"><span :class="['px-2 py-1 rounded text-[10px] font-bold uppercase border', getStatusBadge(receipt.status).class]">{{ getStatusBadge(receipt.status).text }}</span></td>
             <td class="px-5 py-3 text-right space-x-1.5">
               <button @click="openModal(receipt)" class="p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Xem chi tiết"><EyeIcon class="w-5 h-5" /></button>
@@ -145,7 +157,7 @@ onMounted(() => fetchData())
           <div class="p-6 overflow-y-auto flex-1 space-y-6">
             <div class="grid grid-cols-4 gap-4 bg-slate-50 p-4 rounded-lg border">
               <div><p class="text-xs font-bold text-gray-500 uppercase">Đối tác</p><p class="text-sm font-bold text-gray-900 mt-1">{{ selectedReceipt.partnerName }}</p></div>
-              <div><p class="text-xs font-bold text-gray-500 uppercase">Ngày lập</p><p class="text-sm font-bold text-gray-900 mt-1">{{ selectedReceipt.date }}</p></div>
+              <div><p class="text-xs font-bold text-gray-500 uppercase">Kho Gửi Yêu Cầu</p><p class="text-sm font-bold text-indigo-700 mt-1">{{ selectedReceipt.warehouseName }}</p></div>
               <div><p class="text-xs font-bold text-gray-500 uppercase">Loại chứng từ</p><p class="text-sm font-bold text-blue-600 mt-1">{{ selectedReceipt.typeName }}</p></div>
               <div><p class="text-xs font-bold text-gray-500 uppercase">Trạng thái</p><p class="text-sm font-bold text-amber-600 mt-1">{{ getStatusBadge(selectedReceipt.status).text }}</p></div>
             </div>
@@ -175,3 +187,8 @@ onMounted(() => fetchData())
     </Teleport>
   </div>
 </template>
+
+<style scoped>
+.animate-fade-in { animation: fadeIn 0.2s ease-out; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+</style>

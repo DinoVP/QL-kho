@@ -30,6 +30,8 @@ namespace BE.Controllers
                 {
                     Id = l.LocationId,
                     Code = l.LocationCode,
+                    // Bổ sung lấy WarehouseId để Vue lọc dữ liệu theo kho
+                    WarehouseId = l.Rack != null && l.Rack.Zone != null ? l.Rack.Zone.WarehouseId : null,
                     Warehouse = l.Rack != null && l.Rack.Zone != null && l.Rack.Zone.Warehouse != null ? l.Rack.Zone.Warehouse.Whname : "Kho N/A",
                     Zone = l.Rack != null && l.Rack.Zone != null ? l.Rack.Zone.ZoneCode : "Dãy N/A",
                     Rack = l.Rack != null ? l.Rack.RackCode : "Kệ N/A",
@@ -107,6 +109,59 @@ namespace BE.Controllers
             catch (Exception ex) { return BadRequest(new { message = ex.Message }); }
         }
 
+        // ==========================================================
+        // API MỚI: TÍNH NĂNG CẤT HÀNG VÀO KỆ (TỪ SƠ ĐỒ KHO)
+        // ==========================================================
+        [HttpPost("assign-stock")]
+        public async Task<IActionResult> AssignStockToMap([FromBody] AssignStockDto req)
+        {
+            try
+            {
+                var location = await _context.WmsLocations.FirstOrDefaultAsync(l => l.LocationCode == req.LocationCode);
+                if (location == null) return NotFound(new { message = "Không tìm thấy Vị trí kệ này!" });
+
+                // Thêm 1 dòng tồn kho ảo vào vị trí này để vẽ lên sơ đồ
+                var newStock = new WmsStockBalance
+                {
+                    VariantId = req.VariantId,
+                    LocationId = location.LocationId,
+                    Quantity = 1, // Số lượng tượng trưng
+                    // Bổ sung lấy ID kho nếu cần: WarehouseId = location.Rack?.Zone?.WarehouseId
+                };
+
+                _context.WmsStockBalances.Add(newStock);
+                await _context.SaveChangesAsync();
+
+                return Ok(new { message = "Cất hàng vào ô thành công!" });
+            }
+            catch (Exception ex) { return StatusCode(500, new { message = "Lỗi hệ thống: " + ex.Message }); }
+        }
+
+        // ==========================================================
+        // API MỚI: TÍNH NĂNG LẤY HÀNG RA KHỎI KỆ (TỪ SƠ ĐỒ KHO)
+        // Đã sửa để khớp với lỗi 404 sếp chụp trên Console
+        // ==========================================================
+        [HttpDelete("remove-stock-item/{locationCode}/{variantId}")]
+        public async Task<IActionResult> RemoveStockItemFromMap(string locationCode, int variantId)
+        {
+            try
+            {
+                var location = await _context.WmsLocations.FirstOrDefaultAsync(l => l.LocationCode == locationCode);
+                if (location == null) return NotFound(new { message = "Không tìm thấy Vị trí kệ này!" });
+
+                var stockToRemove = await _context.WmsStockBalances
+                    .FirstOrDefaultAsync(s => s.LocationId == location.LocationId && s.VariantId == variantId);
+
+                if (stockToRemove == null) return BadRequest(new { message = "Không tìm thấy sản phẩm này trên kệ!" });
+
+                _context.WmsStockBalances.Remove(stockToRemove);
+                await _context.SaveChangesAsync();
+
+                return Ok(new { message = "Đã lấy hàng ra khỏi ô thành công!" });
+            }
+            catch (Exception ex) { return StatusCode(500, new { message = "Lỗi hệ thống: " + ex.Message }); }
+        }
+
         private static int ExtractTier(string code)
         {
             int tIndex = code?.IndexOf("-T") ?? -1;
@@ -128,6 +183,7 @@ namespace BE.Controllers
     {
         public int? Id { get; set; }
         public string? Code { get; set; }
+        public int? WarehouseId { get; set; } // Field mới để Frontend lọc kho
         public string? Warehouse { get; set; }
         public string? Zone { get; set; }
         public string? Rack { get; set; }
@@ -138,5 +194,11 @@ namespace BE.Controllers
         public string? Status { get; set; }
         public List<int> VariantIds { get; set; } = new List<int>();
         public decimal MaxWeight { get; set; }
+    }
+
+    public class AssignStockDto
+    {
+        public string LocationCode { get; set; }
+        public int VariantId { get; set; }
     }
 }

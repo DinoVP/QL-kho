@@ -84,7 +84,7 @@ onMounted(() => fetchLogs())
     
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
       <div>
-        <h2 class="text-xl md:text-2xl font-bold text-gray-800">Nhật ký Hệ thống (Audit Logs)</h2>
+        <h2 class="text-xl md:text-2xl font-bold text-gray-800">Nhật ký Hệ thống</h2>
         <p class="text-xs md:text-sm text-gray-500 mt-1">Ghi vết toàn bộ thao tác của người dùng để đảm bảo tính minh bạch</p>
       </div>
       <button @click="fetchLogs" class="bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 px-4 py-2 h-10 rounded-lg flex items-center gap-2 text-sm font-medium transition-colors shadow-sm">

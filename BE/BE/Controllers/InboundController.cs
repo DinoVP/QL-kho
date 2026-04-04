@@ -19,6 +19,9 @@ namespace BE.Controllers
             _context = context;
         }
 
+        // ==========================================================
+        // 1. LẤY DANH SÁCH PHIẾU NHẬP
+        // ==========================================================
         [HttpGet]
         public async Task<IActionResult> GetReceipts()
         {
@@ -33,7 +36,8 @@ namespace BE.Controllers
                 Code = r.Grncode,
                 Date = r.ReceiptDate?.ToString("yyyy-MM-dd") ?? "",
                 SupplierId = r.SupplierId ?? 0,
-                SupplierName = "Nhà cung cấp (ID: " + r.SupplierId + ")",
+                // Trả về WarehouseId để Frontend (Vue) thực hiện lọc dữ liệu đa kho
+                WarehouseId = r.WarehouseId,
                 Note = r.Note ?? "",
                 Status = r.Status ?? "pending",
                 TotalQty = r.PurReceiptLines.Sum(l => l.ReceivedQty ?? 0m),
@@ -52,13 +56,16 @@ namespace BE.Controllers
             return Ok(result);
         }
 
+        // ==========================================================
+        // 2. TẠO PHIẾU NHẬP MỚI (CHỜ DUYỆT)
+        // ==========================================================
         [HttpPost]
         public async Task<IActionResult> CreateReceipt([FromBody] InboundReceiptDto req)
         {
             using var transaction = await _context.Database.BeginTransactionAsync();
             try
             {
-                // FIX LỖI UNIQUE KEY: Tạo mã phiếu trước khi Insert vào Database
+                // Tự sinh mã phiếu PN0001, PN0002... nếu frontend không gửi
                 string finalCode = req.Code;
                 if (string.IsNullOrEmpty(finalCode))
                 {
@@ -71,6 +78,7 @@ namespace BE.Controllers
                     Grncode = finalCode,
                     ReceiptDate = DateTime.TryParse(req.Date, out var d) ? d : DateTime.Now,
                     SupplierId = req.SupplierId,
+                    WarehouseId = req.WarehouseId, // Lưu ID kho của người tạo
                     Status = "pending",
                     Note = req.Note
                 };
@@ -87,7 +95,7 @@ namespace BE.Controllers
                             VariantId = item.VariantId,
                             ReceivedQty = Convert.ToInt32(item.Qty ?? 0),
                             Price = item.Price,
-                            LocationId = item.LocationId,
+                            LocationId = null, // Hàng mới lập phiếu chưa có kệ
                             Nsx = DateTime.TryParse(item.Nsx, out var n) ? n : null,
                             Hsd = DateTime.TryParse(item.Hsd, out var h) ? h : null
                         });
@@ -105,45 +113,83 @@ namespace BE.Controllers
             }
         }
 
-        [HttpPut("{id}")]
-        public async Task<IActionResult> UpdateReceipt(int id, [FromBody] InboundReceiptDto req)
+        // ==========================================================
+        // 3. XÁC NHẬN NHẬP KHO (KẾT THÚC PHIẾU)
+        // Hàm này sẽ đẩy hàng vào bãi tập kết (LocationId = NULL)
+        // ==========================================================
+        [HttpPut("{id}/complete")]
+        public async Task<IActionResult> CompleteReceipt(int id)
         {
+            var receipt = await _context.PurReceipts.Include(r => r.PurReceiptLines).FirstOrDefaultAsync(r => r.Grnid == id);
+            if (receipt == null || (receipt.Status != "approved" && receipt.Status != "pending"))
+                return BadRequest(new { message = "Phiếu không ở trạng thái hợp lệ để nhập kho!" });
+
             using var transaction = await _context.Database.BeginTransactionAsync();
             try
             {
-                var receipt = await _context.PurReceipts.Include(r => r.PurReceiptLines).FirstOrDefaultAsync(r => r.Grnid == id);
-                if (receipt == null || receipt.Status != "pending") return BadRequest(new { message = "Chỉ được sửa phiếu đang chờ duyệt!" });
+                int safeWhId = receipt.WarehouseId ?? 1;
 
-                receipt.SupplierId = req.SupplierId;
-                receipt.ReceiptDate = DateTime.TryParse(req.Date, out var d) ? d : DateTime.Now;
-                receipt.Note = req.Note;
-
-                _context.PurReceiptLines.RemoveRange(receipt.PurReceiptLines);
-                if (req.Items != null)
+                foreach (var item in receipt.PurReceiptLines)
                 {
-                    foreach (var item in req.Items)
+                    // FIX LỖI UNIQUE KEY: Kiểm tra xem sản phẩm cùng NSX/HSD đã có ở bãi chờ chưa
+                    var existingStock = await _context.WmsStockBalances.FirstOrDefaultAsync(s =>
+                        s.VariantId == item.VariantId &&
+                        s.LocationId == null &&  // Khu chờ nhập
+                        s.WarehouseId == safeWhId &&
+                        s.Nsx == item.Nsx &&
+                        s.Hsd == item.Hsd);
+
+                    if (existingStock != null)
                     {
-                        _context.PurReceiptLines.Add(new PurReceiptLine
+                        // Đã có -> Cộng dồn số lượng
+                        existingStock.Quantity = (existingStock.Quantity ?? 0) + (item.ReceivedQty ?? 0);
+                        _context.WmsStockBalances.Update(existingStock);
+                    }
+                    else
+                    {
+                        // Chưa có -> Tạo dòng tồn kho mới tại bãi tập kết (LocationId = null)
+                        var newStock = new WmsStockBalance
                         {
-                            Grnid = receipt.Grnid,
                             VariantId = item.VariantId,
-                            ReceivedQty = Convert.ToInt32(item.Qty ?? 0),
-                            Price = item.Price,
-                            LocationId = item.LocationId,
-                            Nsx = DateTime.TryParse(item.Nsx, out var n) ? n : null,
-                            Hsd = DateTime.TryParse(item.Hsd, out var h) ? h : null
-                        });
+                            LocationId = null,
+                            WarehouseId = safeWhId,
+                            Quantity = item.ReceivedQty ?? 0,
+                            Nsx = item.Nsx,
+                            Hsd = item.Hsd
+                        };
+                        _context.WmsStockBalances.Add(newStock);
                     }
                 }
+
+                receipt.Status = "completed";
                 await _context.SaveChangesAsync();
                 await transaction.CommitAsync();
-                return Ok(new { message = "Cập nhật thành công!" });
+                return Ok(new { message = "Nhập hàng thành công! Hàng đã vào bãi tập kết." });
             }
             catch (Exception ex)
             {
                 await transaction.RollbackAsync();
-                return BadRequest(new { message = ex.Message });
+                return BadRequest(new { message = "LỖI SQL: " + (ex.InnerException?.Message ?? ex.Message) });
             }
+        }
+
+        // ==========================================================
+        // CÁC HÀM DUYỆT / TỪ CHỐI / XÓA
+        // ==========================================================
+        [HttpPut("{id}/approve")]
+        public async Task<IActionResult> ApproveReceipt(int id)
+        {
+            var receipt = await _context.PurReceipts.FindAsync(id);
+            if (receipt != null) { receipt.Status = "approved"; await _context.SaveChangesAsync(); }
+            return Ok(new { message = "Đã duyệt phiếu!" });
+        }
+
+        [HttpPut("{id}/reject")]
+        public async Task<IActionResult> RejectReceipt(int id)
+        {
+            var receipt = await _context.PurReceipts.FindAsync(id);
+            if (receipt != null) { receipt.Status = "rejected"; await _context.SaveChangesAsync(); }
+            return Ok(new { message = "Đã từ chối phiếu!" });
         }
 
         [HttpDelete("{id}")]
@@ -157,94 +203,18 @@ namespace BE.Controllers
             await _context.SaveChangesAsync();
             return Ok(new { message = "Xóa thành công!" });
         }
-
-        [HttpPut("{id}/approve")]
-        public async Task<IActionResult> ApproveReceipt(int id)
-        {
-            var receipt = await _context.PurReceipts.FindAsync(id);
-            if (receipt != null)
-            {
-                receipt.Status = "approved";
-                await _context.SaveChangesAsync();
-            }
-            return Ok(new { message = "Đã duyệt!" });
-        }
-
-        [HttpPut("{id}/reject")]
-        public async Task<IActionResult> RejectReceipt(int id)
-        {
-            var receipt = await _context.PurReceipts.FindAsync(id);
-            if (receipt != null)
-            {
-                receipt.Status = "rejected";
-                await _context.SaveChangesAsync();
-            }
-            return Ok(new { message = "Đã từ chối!" });
-        }
-
-        [HttpPut("{id}/complete")]
-        public async Task<IActionResult> CompleteReceipt(int id)
-        {
-            var receipt = await _context.PurReceipts.Include(r => r.PurReceiptLines).FirstOrDefaultAsync(r => r.Grnid == id);
-            if (receipt == null || receipt.Status != "approved") return BadRequest(new { message = "Phiếu chưa duyệt!" });
-
-            using var transaction = await _context.Database.BeginTransactionAsync();
-            try
-            {
-                int safeWhId = await _context.WmsWarehouses.Select(w => w.WarehouseId).FirstOrDefaultAsync();
-                if (safeWhId == 0) safeWhId = 1;
-
-                foreach (var item in receipt.PurReceiptLines)
-                {
-                    int locId = item.LocationId ?? 1;
-                    var stockType = typeof(WmsStockBalance);
-                    var qtyProp = stockType.GetProperty("Quantity") ?? stockType.GetProperty("Qty") ?? stockType.GetProperty("StockQty");
-
-                    if (qtyProp != null)
-                    {
-                        var existingStock = await _context.WmsStockBalances.FirstOrDefaultAsync(s => s.VariantId == item.VariantId && s.LocationId == locId && s.Nsx == item.Nsx && s.Hsd == item.Hsd);
-                        Type targetType = Nullable.GetUnderlyingType(qtyProp.PropertyType) ?? qtyProp.PropertyType;
-
-                        if (existingStock != null)
-                        {
-                            decimal currentQty = Convert.ToDecimal(qtyProp.GetValue(existingStock) ?? 0m);
-                            qtyProp.SetValue(existingStock, Convert.ChangeType(currentQty + (item.ReceivedQty ?? 0m), targetType));
-                        }
-                        else
-                        {
-                            var newStock = new WmsStockBalance
-                            {
-                                VariantId = item.VariantId,
-                                LocationId = locId,
-                                WarehouseId = safeWhId,
-                                Nsx = item.Nsx,
-                                Hsd = item.Hsd
-                            };
-                            qtyProp.SetValue(newStock, Convert.ChangeType(item.ReceivedQty ?? 0m, targetType));
-                            _context.WmsStockBalances.Add(newStock);
-                        }
-                    }
-                }
-                receipt.Status = "completed";
-                await _context.SaveChangesAsync();
-                await transaction.CommitAsync();
-                return Ok(new { message = "Nhập kho thành công!" });
-            }
-            catch (Exception ex)
-            {
-                await transaction.RollbackAsync();
-                return BadRequest(new { message = "LỖI SQL: " + (ex.InnerException?.Message ?? ex.Message) });
-            }
-        }
     }
 
+    // ==========================================================
+    // DTO MODELS
+    // ==========================================================
     public class InboundReceiptDto
     {
         public int? Id { get; set; }
         public string? Code { get; set; }
         public string? Date { get; set; }
         public int? SupplierId { get; set; }
-        public string? SupplierName { get; set; }
+        public int? WarehouseId { get; set; }
         public string? Note { get; set; }
         public string? Status { get; set; }
         public decimal? TotalQty { get; set; }
@@ -257,11 +227,9 @@ namespace BE.Controllers
         public int? VariantId { get; set; }
         public string? Sku { get; set; }
         public string? Name { get; set; }
-        public string? Unit { get; set; }
         public decimal? Qty { get; set; }
         public decimal? Price { get; set; }
         public int? LocationId { get; set; }
-        public string? LocationCode { get; set; }
         public string? Nsx { get; set; }
         public string? Hsd { get; set; }
     }

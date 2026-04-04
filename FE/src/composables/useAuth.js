@@ -1,11 +1,14 @@
 import { ref, computed } from "vue";
 import axios from "axios";
 
-const currentUserRole = ref(localStorage.getItem("userRole") || null);
+// Lấy dữ liệu từ bộ nhớ
+const currentUserRole = ref(
+  localStorage.getItem("role") || localStorage.getItem("userRole") || null,
+);
 const authToken = ref(localStorage.getItem("authToken") || null);
 const currentUsername = ref(localStorage.getItem("username") || null);
 
-// ĐÃ SỬA LẠI ĐÚNG CỔNG HTTPS 7139 CỦA SẾP
+// Cấu hình API
 const api = axios.create({
   baseURL: "https://localhost:7139/api",
   headers: { "Content-Type": "application/json" },
@@ -21,15 +24,51 @@ export function useAuth() {
       const response = await api.post("/Auth/login", { username, password });
       const data = response.data;
 
+      // 1. Lưu Token tạm thời để gọi các API khác
       localStorage.setItem("authToken", data.token);
-      localStorage.setItem("userRole", data.role);
-      localStorage.setItem("username", data.username);
-
-      authToken.value = data.token;
-      currentUserRole.value = data.role;
-      currentUsername.value = data.username;
-
+      localStorage.setItem("username", username);
       api.defaults.headers.common["Authorization"] = `Bearer ${data.token}`;
+
+      let role = data.role || data.Role || data.roleCode || data.RoleCode;
+      let branchId = data.branchId || data.BranchId;
+      let warehouseId = data.warehouseId || data.WarehouseId;
+
+      // =========================================================================
+      // 2. BẢO HIỂM 100%: NẾU API LOGIN KHÔNG TRẢ VỀ MÃ KHO -> TỰ ĐỘNG ĐI TÌM!
+      // =========================================================================
+      if (!warehouseId || !branchId) {
+        try {
+          // Gọi API Employees để lấy hồ sơ của chính user này
+          const empRes = await api.get("/Employees");
+          const myProfile = empRes.data.find(
+            (e) => e.username === username || e.Username === username,
+          );
+
+          if (myProfile) {
+            role = role || myProfile.roleCode || myProfile.RoleCode;
+            branchId = branchId || myProfile.branchId || myProfile.BranchId;
+            warehouseId =
+              warehouseId || myProfile.warehouseId || myProfile.WarehouseId;
+          }
+        } catch (err) {
+          console.log("Không thể lấy thông tin chi nhánh/kho phụ", err);
+        }
+      }
+      // =========================================================================
+
+      // 3. Xóa data cũ và lưu data mới chuẩn xác vào Trình duyệt
+      localStorage.removeItem("warehouseId");
+      localStorage.removeItem("branchId");
+
+      localStorage.setItem("userRole", role);
+      localStorage.setItem("role", role);
+      if (branchId) localStorage.setItem("branchId", branchId);
+      if (warehouseId) localStorage.setItem("warehouseId", warehouseId);
+
+      // Cập nhật State
+      authToken.value = data.token;
+      currentUserRole.value = role;
+      currentUsername.value = username;
 
       return { success: true };
     } catch (error) {
@@ -41,7 +80,7 @@ export function useAuth() {
   };
 
   const logout = () => {
-    localStorage.clear();
+    localStorage.clear(); // Quét sạch bộ nhớ khi Đăng xuất
     currentUserRole.value = null;
     authToken.value = null;
     currentUsername.value = null;

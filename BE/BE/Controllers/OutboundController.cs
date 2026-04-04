@@ -31,6 +31,7 @@ namespace BE.Controllers
                 Date = r.DeliveryDate?.ToString("yyyy-MM-dd") ?? "",
                 CustomerId = r.CustomerId ?? 0,
                 CustomerName = "Khách hàng (ID: " + r.CustomerId + ")",
+                WarehouseId = r.WarehouseId, // FIX: Trả về mã kho để Vue lọc
                 Note = r.Note ?? "",
                 Status = r.Status ?? "pending",
                 TotalQty = r.SalDeliveryLines.Sum(l => l.DeliveredQty ?? 0m),
@@ -41,8 +42,8 @@ namespace BE.Controllers
                     Qty = l.DeliveredQty ?? 0m,
                     Price = l.Price ?? 0m,
                     LocationId = l.LocationId,
-                    Nsx = l.Nsx?.ToString("yyyy-MM-dd"), // Lấy NSX lô xuất
-                    Hsd = l.Hsd?.ToString("yyyy-MM-dd")  // Lấy HSD lô xuất
+                    Nsx = l.Nsx?.ToString("yyyy-MM-dd"),
+                    Hsd = l.Hsd?.ToString("yyyy-MM-dd")
                 }).ToList()
             }).ToList();
 
@@ -67,6 +68,7 @@ namespace BE.Controllers
                     Docode = finalCode,
                     DeliveryDate = DateTime.TryParse(req.Date, out var d) ? d : DateTime.Now,
                     CustomerId = req.CustomerId,
+                    WarehouseId = req.WarehouseId, // FIX: Hứng mã kho và lưu vào DB
                     Status = "pending",
                     Note = req.Note
                 };
@@ -108,7 +110,10 @@ namespace BE.Controllers
                 var delivery = await _context.SalDeliveries.Include(r => r.SalDeliveryLines).FirstOrDefaultAsync(r => r.Doid == id);
                 if (delivery == null || delivery.Status != "pending") return BadRequest(new { message = "Chỉ được sửa phiếu chờ duyệt!" });
 
-                delivery.CustomerId = req.CustomerId; delivery.DeliveryDate = DateTime.TryParse(req.Date, out var d) ? d : DateTime.Now; delivery.Note = req.Note;
+                delivery.CustomerId = req.CustomerId;
+                delivery.DeliveryDate = DateTime.TryParse(req.Date, out var d) ? d : DateTime.Now;
+                delivery.Note = req.Note;
+
                 _context.SalDeliveryLines.RemoveRange(delivery.SalDeliveryLines);
 
                 if (req.Items != null)
@@ -164,7 +169,6 @@ namespace BE.Controllers
             return Ok(new { message = "Đã từ chối!" });
         }
 
-        // TRỪ KHO CHUẨN XÁC THEO NSX, HSD VÀ VỊ TRÍ
         [HttpPut("{id}/complete")]
         public async Task<IActionResult> CompleteReceipt(int id)
         {
@@ -181,7 +185,6 @@ namespace BE.Controllers
 
                     if (qtyProp != null)
                     {
-                        // Tìm ĐÚNG dòng tồn kho: Cùng SP + Cùng Kệ + Cùng NSX + Cùng HSD
                         var existingStock = await _context.WmsStockBalances.FirstOrDefaultAsync(s =>
                             s.VariantId == item.VariantId &&
                             s.LocationId == item.LocationId &&
@@ -193,7 +196,6 @@ namespace BE.Controllers
                             decimal currentQty = Convert.ToDecimal(qtyProp.GetValue(existingStock) ?? 0m);
                             decimal newQty = currentQty - (item.DeliveredQty ?? 0m);
 
-                            // Nếu xuất hết sạch lô đó thì xóa dòng tồn kho, ngược lại thì cập nhật số lượng
                             if (newQty <= 0) _context.WmsStockBalances.Remove(existingStock);
                             else
                             {
@@ -226,6 +228,7 @@ namespace BE.Controllers
         public string? Date { get; set; }
         public int? CustomerId { get; set; }
         public string? CustomerName { get; set; }
+        public int? WarehouseId { get; set; } // FIX: Bổ sung trường nhận Mã Kho
         public string? Note { get; set; }
         public string? Status { get; set; }
         public decimal? TotalQty { get; set; }
@@ -243,7 +246,7 @@ namespace BE.Controllers
         public decimal? Price { get; set; }
         public int? LocationId { get; set; }
         public string? LocationCode { get; set; }
-        public string? Nsx { get; set; } // Map NSX
-        public string? Hsd { get; set; } // Map HSD
+        public string? Nsx { get; set; }
+        public string? Hsd { get; set; }
     }
 }

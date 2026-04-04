@@ -71,6 +71,14 @@ const filteredEmployees = computed(() => {
   return result
 })
 
+// === LOGIC KIỂM TRA VỊ TRÍ ĐÃ CÓ CHỦ (CHỐNG GHI ĐÈ) ===
+const isBranchOccupied = (branchId) => {
+  return employees.value.some(e => e.roleCode === 'gd_chi_nhanh' && e.branchId === branchId && e.isActive)
+}
+const isWarehouseOccupied = (whId) => {
+  return employees.value.some(e => e.roleCode === 'ql_kho' && e.warehouseId === whId && e.isActive)
+}
+
 const toast = ref({ show: false, message: '', type: 'success' })
 const showToast = (message, type = 'success') => {
   toast.value = { show: true, message, type }
@@ -122,7 +130,7 @@ const submitAssignWorkplace = async () => {
   try {
     const res = await fetch(`${API_URL}/${assignFormData.value.employeeId}/assign-workplace`, {
       method: 'PUT',
-      headers: getAuthHeaders(), // <-- Cắm thẻ vào
+      headers: getAuthHeaders(),
       body: JSON.stringify({
         branchId: assignFormData.value.branchId,
         warehouseId: assignFormData.value.warehouseId
@@ -139,7 +147,6 @@ const submitAssignWorkplace = async () => {
 const fetchData = async () => {
   isLoading.value = true
   try {
-    // <-- Cắm thẻ vào các request GET
     const [empRes, workRes] = await Promise.all([ 
       fetch(API_URL, { headers: getSimpleAuthHeader() }), 
       fetch(`${API_URL}/workplaces`, { headers: getSimpleAuthHeader() }) 
@@ -158,7 +165,7 @@ const submitForm = async () => {
   try {
     const response = await fetch(API_URL, {
       method: 'POST',
-      headers: getAuthHeaders(), // <-- Cắm thẻ vào
+      headers: getAuthHeaders(),
       body: JSON.stringify(formData.value)
     })
     if (response.ok) {
@@ -179,7 +186,7 @@ const toggleStatus = async (employeeId) => {
   try {
     const response = await fetch(`${API_URL}/toggle-status/${employeeId}`, { 
       method: 'PUT',
-      headers: getSimpleAuthHeader() // <-- Cắm thẻ vào
+      headers: getSimpleAuthHeader() 
     })
     if (response.ok) {
       const result = await response.json()
@@ -194,7 +201,7 @@ const removeWorkplace = async (employeeId, empName) => {
   try {
     const res = await fetch(`${API_URL}/remove-workplace/${employeeId}`, { 
       method: 'PUT',
-      headers: getSimpleAuthHeader() // <-- Cắm thẻ vào
+      headers: getSimpleAuthHeader() 
     })
     if (res.ok) {
       showToast('Đã gỡ nhân viên khỏi vị trí làm việc!', 'success')
@@ -350,7 +357,11 @@ onMounted(() => { fetchData() })
                 <label class="block text-sm font-bold text-blue-700 mb-1">Gán vào Chi nhánh *</label>
                 <select v-model="assignFormData.branchId" class="w-full border border-blue-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 bg-white">
                   <option :value="null">-- Chọn Chi nhánh --</option>
-                  <option v-for="b in workplaces.branches" :key="b.branchId" :value="b.branchId">{{ b.branchName }}</option>
+                  <option v-for="b in workplaces.branches" :key="b.branchId" :value="b.branchId"
+                    :disabled="assignFormData.roleCode === 'gd_chi_nhanh' && isBranchOccupied(b.branchId)"
+                    :class="assignFormData.roleCode === 'gd_chi_nhanh' && isBranchOccupied(b.branchId) ? 'text-gray-300 bg-gray-50' : ''">
+                    {{ b.branchName }} {{ (assignFormData.roleCode === 'gd_chi_nhanh' && isBranchOccupied(b.branchId)) ? '(Đã có GĐ)' : '' }}
+                  </option>
                 </select>
               </div>
 
@@ -358,7 +369,11 @@ onMounted(() => { fetchData() })
                 <label class="block text-sm font-bold text-orange-600 mb-1">Gán vào Kho *</label>
                 <select v-model="assignFormData.warehouseId" class="w-full border border-orange-300 rounded-lg p-2.5 focus:ring-2 focus:ring-orange-500 bg-white">
                   <option :value="null">-- Chọn Kho --</option>
-                  <option v-for="w in availableWarehousesForAssign" :key="w.warehouseId" :value="w.warehouseId">{{ w.warehouseName }}</option>
+                  <option v-for="w in availableWarehousesForAssign" :key="w.warehouseId" :value="w.warehouseId"
+                    :disabled="assignFormData.roleCode === 'ql_kho' && isWarehouseOccupied(w.warehouseId)"
+                    :class="assignFormData.roleCode === 'ql_kho' && isWarehouseOccupied(w.warehouseId) ? 'text-gray-300 bg-gray-50' : ''">
+                    {{ w.warehouseName }} {{ (assignFormData.roleCode === 'ql_kho' && isWarehouseOccupied(w.warehouseId)) ? '(Đã có QL)' : '' }}
+                  </option>
                 </select>
                 <div v-if="availableWarehousesForAssign.length === 0" class="text-xs text-red-500 mt-1 italic">Chi nhánh này chưa có kho nào!</div>
               </div>
@@ -373,95 +388,107 @@ onMounted(() => { fetchData() })
       </div>
     </Teleport>
 
-    <div v-if="isAddModalOpen" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 animate-fade-in">
-      <div class="bg-white rounded-xl shadow-2xl w-full max-w-4xl overflow-hidden">
-        <div class="bg-primary-600 p-4 flex justify-between items-center text-white">
-          <h3 class="font-bold text-lg flex items-center gap-2"><IdentificationIcon class="w-6 h-6" /> Thêm Nhân viên mới</h3>
-          <button @click="isAddModalOpen = false" class="text-white hover:text-gray-200 text-2xl leading-none">&times;</button>
-        </div>
-        
-        <div class="p-6">
-          <div class="bg-blue-50 text-blue-700 p-3 rounded-lg text-sm mb-5 border border-blue-200 flex items-center gap-2">
-            <span class="font-bold">Lưu ý:</span> Mã nhân viên sẽ được tự động sinh ra dựa trên Phân quyền.
+    <Teleport to="body">
+      <div v-if="isAddModalOpen" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 animate-fade-in">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-4xl overflow-hidden">
+          <div class="bg-primary-600 p-4 flex justify-between items-center text-white">
+            <h3 class="font-bold text-lg flex items-center gap-2"><IdentificationIcon class="w-6 h-6" /> Thêm Nhân viên mới</h3>
+            <button @click="isAddModalOpen = false" class="text-white hover:text-gray-200 text-2xl leading-none">&times;</button>
           </div>
-
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div class="space-y-4">
-              <h4 class="font-semibold text-gray-700 border-b pb-2 flex items-center gap-2"><UserIcon class="w-4 h-4"/> Thông tin cá nhân</h4>
-              <div><label class="block text-sm text-gray-600 mb-1">Họ và Tên *</label><input v-model="formData.fullName" type="text" class="w-full border border-gray-300 rounded-lg p-2.5"></div>
-              <div><label class="block text-sm text-gray-600 mb-1">Số điện thoại</label><input v-model="formData.phone" type="tel" class="w-full border border-gray-300 rounded-lg p-2.5"></div>
-              <div><label class="block text-sm text-gray-600 mb-1">Email</label><input v-model="formData.email" type="email" class="w-full border border-gray-300 rounded-lg p-2.5"></div>
+          
+          <div class="p-6">
+            <div class="bg-blue-50 text-blue-700 p-3 rounded-lg text-sm mb-5 border border-blue-200 flex items-center gap-2">
+              <span class="font-bold">Lưu ý:</span> Mã nhân viên sẽ được tự động sinh ra dựa trên Phân quyền.
             </div>
 
-            <div class="space-y-4">
-              <h4 class="font-semibold text-gray-700 border-b pb-2 flex items-center gap-2"><LockClosedIcon class="w-4 h-4"/> Thông tin Tài khoản</h4>
-              <div><label class="block text-sm text-gray-600 mb-1">Tên đăng nhập *</label><input v-model="formData.username" type="text" class="w-full border border-gray-300 rounded-lg p-2.5"></div>
-              <div><label class="block text-sm text-gray-600 mb-1">Mật khẩu *</label><input v-model="formData.password" type="password" class="w-full border border-gray-300 rounded-lg p-2.5"></div>
-              <div>
-                <label class="block text-sm font-bold text-purple-700 mb-1">Phân quyền *</label>
-                <select v-model="formData.roleCode" class="w-full border-2 border-purple-300 rounded-lg p-2.5 bg-white text-purple-900 font-medium">
-                  <option v-for="role in roleOptions" :key="role.value" :value="role.value">{{ role.label }} ({{ role.value }})</option>
-                </select>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div class="space-y-4">
+                <h4 class="font-semibold text-gray-700 border-b pb-2 flex items-center gap-2"><UserIcon class="w-4 h-4"/> Thông tin cá nhân</h4>
+                <div><label class="block text-sm text-gray-600 mb-1">Họ và Tên *</label><input v-model="formData.fullName" type="text" class="w-full border border-gray-300 rounded-lg p-2.5"></div>
+                <div><label class="block text-sm text-gray-600 mb-1">Số điện thoại</label><input v-model="formData.phone" type="tel" class="w-full border border-gray-300 rounded-lg p-2.5"></div>
+                <div><label class="block text-sm text-gray-600 mb-1">Email</label><input v-model="formData.email" type="email" class="w-full border border-gray-300 rounded-lg p-2.5"></div>
               </div>
-            </div>
 
-            <div class="space-y-4 bg-gray-50 p-4 rounded-xl border border-gray-200">
-              <h4 class="font-semibold text-gray-700 border-b border-gray-300 pb-2 flex items-center gap-2"><MapPinIcon class="w-4 h-4"/> Vị trí làm việc</h4>
-              <div v-if="['admin', 'giam_doc'].includes(formData.roleCode)" class="text-sm text-gray-500 italic mt-4 text-center">Quyền quản trị không gán cố định.</div>
-              <div v-if="['gd_chi_nhanh', 'ql_kho', 'nv_kho'].includes(formData.roleCode)" class="mt-2 space-y-4 animate-fade-in">
+              <div class="space-y-4">
+                <h4 class="font-semibold text-gray-700 border-b pb-2 flex items-center gap-2"><LockClosedIcon class="w-4 h-4"/> Thông tin Tài khoản</h4>
+                <div><label class="block text-sm text-gray-600 mb-1">Tên đăng nhập *</label><input v-model="formData.username" type="text" class="w-full border border-gray-300 rounded-lg p-2.5"></div>
+                <div><label class="block text-sm text-gray-600 mb-1">Mật khẩu *</label><input v-model="formData.password" type="password" class="w-full border border-gray-300 rounded-lg p-2.5"></div>
                 <div>
-                  <label class="block text-sm font-bold text-blue-700 mb-1">Chọn Chi nhánh (Tùy chọn)</label>
-                  <select v-model="formData.branchId" class="w-full border border-blue-300 rounded-lg p-2.5 bg-white">
-                    <option :value="null">-- Chọn Chi nhánh --</option>
-                    <option v-for="b in workplaces.branches" :key="b.branchId" :value="b.branchId">{{ b.branchName }}</option>
+                  <label class="block text-sm font-bold text-purple-700 mb-1">Phân quyền *</label>
+                  <select v-model="formData.roleCode" class="w-full border-2 border-purple-300 rounded-lg p-2.5 bg-white text-purple-900 font-medium">
+                    <option v-for="role in roleOptions" :key="role.value" :value="role.value">{{ role.label }} ({{ role.value }})</option>
                   </select>
                 </div>
-                <div v-if="['ql_kho', 'nv_kho'].includes(formData.roleCode) && formData.branchId" class="animate-fade-in">
-                  <label class="block text-sm font-bold text-orange-600 mb-1">Chọn Kho (Tùy chọn)</label>
-                  <select v-model="formData.warehouseId" class="w-full border border-orange-300 rounded-lg p-2.5 bg-white">
-                    <option :value="null">-- Chọn Kho --</option>
-                    <option v-for="w in availableWarehouses" :key="w.warehouseId" :value="w.warehouseId">{{ w.warehouseName }}</option>
-                  </select>
-                  <div v-if="availableWarehouses.length === 0" class="text-xs text-red-500 mt-1 italic">Chi nhánh chưa có kho!</div>
+              </div>
+
+              <div class="space-y-4 bg-gray-50 p-4 rounded-xl border border-gray-200">
+                <h4 class="font-semibold text-gray-700 border-b border-gray-300 pb-2 flex items-center gap-2"><MapPinIcon class="w-4 h-4"/> Vị trí làm việc</h4>
+                <div v-if="['admin', 'giam_doc'].includes(formData.roleCode)" class="text-sm text-gray-500 italic mt-4 text-center">Quyền quản trị không gán cố định.</div>
+                <div v-if="['gd_chi_nhanh', 'ql_kho', 'nv_kho'].includes(formData.roleCode)" class="mt-2 space-y-4 animate-fade-in">
+                  <div>
+                    <label class="block text-sm font-bold text-blue-700 mb-1">Chọn Chi nhánh (Tùy chọn)</label>
+                    <select v-model="formData.branchId" class="w-full border border-blue-300 rounded-lg p-2.5 bg-white">
+                      <option :value="null">-- Chọn Chi nhánh --</option>
+                      <option v-for="b in workplaces.branches" :key="b.branchId" :value="b.branchId"
+                        :disabled="formData.roleCode === 'gd_chi_nhanh' && isBranchOccupied(b.branchId)"
+                        :class="formData.roleCode === 'gd_chi_nhanh' && isBranchOccupied(b.branchId) ? 'text-gray-300 bg-gray-50' : ''">
+                        {{ b.branchName }} {{ (formData.roleCode === 'gd_chi_nhanh' && isBranchOccupied(b.branchId)) ? '(Đã có GĐ)' : '' }}
+                      </option>
+                    </select>
+                  </div>
+                  <div v-if="['ql_kho', 'nv_kho'].includes(formData.roleCode) && formData.branchId" class="animate-fade-in">
+                    <label class="block text-sm font-bold text-orange-600 mb-1">Chọn Kho (Tùy chọn)</label>
+                    <select v-model="formData.warehouseId" class="w-full border border-orange-300 rounded-lg p-2.5 bg-white">
+                      <option :value="null">-- Chọn Kho --</option>
+                      <option v-for="w in availableWarehouses" :key="w.warehouseId" :value="w.warehouseId"
+                        :disabled="formData.roleCode === 'ql_kho' && isWarehouseOccupied(w.warehouseId)"
+                        :class="formData.roleCode === 'ql_kho' && isWarehouseOccupied(w.warehouseId) ? 'text-gray-300 bg-gray-50' : ''">
+                        {{ w.warehouseName }} {{ (formData.roleCode === 'ql_kho' && isWarehouseOccupied(w.warehouseId)) ? '(Đã có QL)' : '' }}
+                      </option>
+                    </select>
+                    <div v-if="availableWarehouses.length === 0" class="text-xs text-red-500 mt-1 italic">Chi nhánh chưa có kho!</div>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
 
-          <div class="pt-5 flex justify-end gap-3 border-t mt-6">
-            <button @click="isAddModalOpen = false" class="px-6 py-2.5 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium transition-colors">Hủy bỏ</button>
-            <button @click="submitForm" class="px-6 py-2.5 text-white bg-primary-600 hover:bg-primary-700 rounded-lg font-medium">Xác nhận Lưu</button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div v-if="isDetailModalOpen" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 animate-fade-in">
-      <div class="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden">
-        <div class="bg-gray-100 p-4 flex justify-between items-center border-b">
-          <h3 class="font-bold text-gray-800 text-lg flex items-center gap-2"><UserIcon class="w-6 h-6 text-primary-600" /> Hồ sơ Nhân sự</h3>
-          <button @click="isDetailModalOpen = false" class="text-gray-500 hover:text-gray-800 text-2xl leading-none">&times;</button>
-        </div>
-        
-        <div class="p-6 space-y-4" v-if="selectedEmployee">
-          <div class="flex justify-between items-center border-b pb-2"><span class="text-gray-500 text-sm">Họ và tên:</span><span class="font-bold text-gray-800">{{ selectedEmployee.fullName }}</span></div>
-          <div class="flex justify-between items-center border-b pb-2"><span class="text-gray-500 text-sm">Mã Nhân viên:</span><span class="font-bold text-primary-600">{{ selectedEmployee.empCode }}</span></div>
-          <div class="flex justify-between items-center border-b pb-2">
-            <span class="text-gray-500 text-sm">Nơi làm việc:</span>
-            <div class="text-right">
-              <div v-if="selectedEmployee.branchName" class="font-bold text-blue-700">{{ selectedEmployee.branchName }}</div>
-              <div v-if="selectedEmployee.warehouseName" class="text-xs font-medium text-gray-500 mt-0.5">{{ selectedEmployee.warehouseName }}</div>
-              <div v-if="!selectedEmployee.branchName" class="font-medium text-gray-400 italic">Chưa gán vị trí</div>
+            <div class="pt-5 flex justify-end gap-3 border-t mt-6">
+              <button @click="isAddModalOpen = false" class="px-6 py-2.5 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium transition-colors">Hủy bỏ</button>
+              <button @click="submitForm" class="px-6 py-2.5 text-white bg-primary-600 hover:bg-primary-700 rounded-lg font-medium">Xác nhận Lưu</button>
             </div>
           </div>
-          <div class="flex justify-between items-center border-b pb-2"><span class="text-gray-500 text-sm">Số điện thoại:</span><span class="font-medium text-gray-800">{{ selectedEmployee.phone || 'Chưa cập nhật' }}</span></div>
-          <div class="flex justify-between items-center border-b pb-2"><span class="text-gray-500 text-sm">Email liên hệ:</span><span class="font-medium text-gray-800">{{ selectedEmployee.email || 'Chưa cập nhật' }}</span></div>
-          <div class="flex justify-between items-center border-b pb-2"><span class="text-gray-500 text-sm">Tài khoản:</span><span class="font-medium text-gray-800">{{ selectedEmployee.username }}</span></div>
-          <div class="flex justify-between items-center pb-2"><span class="text-gray-500 text-sm">Phân quyền:</span><span class="font-medium text-purple-600">{{ selectedEmployee.roleCode }}</span></div>
         </div>
-        <div class="p-4 bg-gray-50 text-right"><button @click="isDetailModalOpen = false" class="px-5 py-2 text-white bg-gray-600 rounded-lg">Đóng lại</button></div>
       </div>
-    </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div v-if="isDetailModalOpen" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 animate-fade-in">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden">
+          <div class="bg-gray-100 p-4 flex justify-between items-center border-b">
+            <h3 class="font-bold text-gray-800 text-lg flex items-center gap-2"><UserIcon class="w-6 h-6 text-primary-600" /> Hồ sơ Nhân sự</h3>
+            <button @click="isDetailModalOpen = false" class="text-gray-500 hover:text-gray-800 text-2xl leading-none">&times;</button>
+          </div>
+          
+          <div class="p-6 space-y-4" v-if="selectedEmployee">
+            <div class="flex justify-between items-center border-b pb-2"><span class="text-gray-500 text-sm">Họ và tên:</span><span class="font-bold text-gray-800">{{ selectedEmployee.fullName }}</span></div>
+            <div class="flex justify-between items-center border-b pb-2"><span class="text-gray-500 text-sm">Mã Nhân viên:</span><span class="font-bold text-primary-600">{{ selectedEmployee.empCode }}</span></div>
+            <div class="flex justify-between items-center border-b pb-2">
+              <span class="text-gray-500 text-sm">Nơi làm việc:</span>
+              <div class="text-right">
+                <div v-if="selectedEmployee.branchName" class="font-bold text-blue-700">{{ selectedEmployee.branchName }}</div>
+                <div v-if="selectedEmployee.warehouseName" class="text-xs font-medium text-gray-500 mt-0.5">{{ selectedEmployee.warehouseName }}</div>
+                <div v-if="!selectedEmployee.branchName" class="font-medium text-gray-400 italic">Chưa gán vị trí</div>
+              </div>
+            </div>
+            <div class="flex justify-between items-center border-b pb-2"><span class="text-gray-500 text-sm">Số điện thoại:</span><span class="font-medium text-gray-800">{{ selectedEmployee.phone || 'Chưa cập nhật' }}</span></div>
+            <div class="flex justify-between items-center border-b pb-2"><span class="text-gray-500 text-sm">Email liên hệ:</span><span class="font-medium text-gray-800">{{ selectedEmployee.email || 'Chưa cập nhật' }}</span></div>
+            <div class="flex justify-between items-center border-b pb-2"><span class="text-gray-500 text-sm">Tài khoản:</span><span class="font-medium text-gray-800">{{ selectedEmployee.username }}</span></div>
+            <div class="flex justify-between items-center pb-2"><span class="text-gray-500 text-sm">Phân quyền:</span><span class="font-medium text-purple-600">{{ selectedEmployee.roleCode }}</span></div>
+          </div>
+          <div class="p-4 bg-gray-50 text-right"><button @click="isDetailModalOpen = false" class="px-5 py-2 text-white bg-gray-600 rounded-lg">Đóng lại</button></div>
+        </div>
+      </div>
+    </Teleport>
 
   </div>
 </template>

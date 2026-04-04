@@ -14,6 +14,7 @@ import Partner from "../views/Partner.vue";
 import Inbound from "../views/Inbound.vue";
 import Outbound from "../views/Outbound.vue";
 import Transfer from "../views/Transfer.vue";
+import Putaway from "../views/Putaway.vue"; // <-- THÊM COMPONENT MỚI
 import Defect from "../views/Defect.vue";
 import PurchaseOrder from "../views/PurchaseOrder.vue";
 import InventoryCheck from "../views/InventoryCheck.vue";
@@ -103,6 +104,12 @@ const router = createRouter({
       name: "transfer",
       component: Transfer,
       meta: { title: "Điều chuyển" },
+    },
+    {
+      path: "/putaway",
+      name: "putaway",
+      component: Putaway,
+      meta: { title: "Kho bãi" }, 
     },
     {
       path: "/defects",

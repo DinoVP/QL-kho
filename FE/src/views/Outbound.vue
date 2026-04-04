@@ -7,12 +7,14 @@ import {
 } from '@heroicons/vue/24/outline'
 
 const OUTBOUND_API = 'https://localhost:7139/api/Outbound'
-const STOCK_API = 'https://localhost:7139/api/Stock' // API Tồn kho
+const STOCK_API = 'https://localhost:7139/api/Stock' 
 const PROD_API = 'https://localhost:7139/api/Products'
 const PARTNER_API = 'https://localhost:7139/api/CrmPartners'
 const LOC_API = 'https://localhost:7139/api/Locations'
 
 const getAuthHeaders = () => ({ 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (localStorage.getItem('authToken') || '') })
+
+const myWarehouseId = ref(parseInt(localStorage.getItem('warehouseId')) || null)
 
 const outboundReceipts = ref([]); const customers = ref([]); 
 const productsList = ref([]); const locationsList = ref([]); const stockList = ref([])
@@ -36,17 +38,19 @@ const fetchData = async () => {
       customers.value = rawPartners.filter(p => p.isCustomer || p.partnerCode?.startsWith('KH'))
     }
     
-    // LOAD TỒN KHO THỰC TẾ
+    // LOAD TỒN KHO THỰC TẾ (Lọc đúng kho mình)
     if (stockRes.ok) {
       const rawStocks = await stockRes.json();
-      stockList.value = rawStocks.map(s => {
+      const filteredStocks = rawStocks.filter(s => !myWarehouseId.value || s.warehouseId === myWarehouseId.value || s.WarehouseId === myWarehouseId.value)
+      
+      stockList.value = filteredStocks.map(s => {
         const prod = productsList.value.find(p => p.id === s.variantId || p.Id === s.variantId) || {};
         const loc = locationsList.value.find(l => l.id === s.locationId || l.Id === s.locationId) || {};
         return {
           stockId: s.id, variantId: s.variantId, qtyAvailable: s.qty || 0,
           nsx: s.nsx || '', hsd: s.hsd || '',
           sku: prod.sku || prod.Sku || 'N/A', name: prod.name || prod.Name || 'Lỗi', unit: prod.unit || prod.Unit || 'Cái',
-          price: prod.price || prod.Price || 0,
+          price: prod.price || prod.Price || 0, conversionRate: prod.conversionRate || prod.ConversionRate || 24,
           locationId: s.locationId, locationCode: loc.code || loc.Code || 'Khu chung'
         }
       })
@@ -54,7 +58,10 @@ const fetchData = async () => {
 
     if (outRes.ok) {
       const rawOutbound = await outRes.json()
-      outboundReceipts.value = rawOutbound.map(r => {
+      // LỌC CHẶT CHẼ DỮ LIỆU: Chỉ thấy phiếu xuất của kho mình
+      const filteredOutbound = rawOutbound.filter(r => !myWarehouseId.value || r.warehouseId === myWarehouseId.value || r.WarehouseId === myWarehouseId.value)
+
+      outboundReceipts.value = filteredOutbound.map(r => {
         const cusId = r.customerId || r.CustomerId;
         const cus = customers.value.find(c => c.partnerId === cusId || c.id === cusId);
         r.customerName = cus ? (cus.partnerName || cus.name) : `Khách hàng (ID: ${cusId})`;
@@ -80,7 +87,7 @@ const filteredReceipts = computed(() => {
 })
 
 const showModal = ref(false); const modalMode = ref('add') 
-const formData = ref({ id: 0, code: '', date: getToday(), customerId: '', items: [], note: '', status: 'pending' })
+const formData = ref({ id: 0, code: '', date: getToday(), customerId: '', warehouseId: myWarehouseId.value, items: [], note: '', status: 'pending' })
 
 const openModal = (mode, receipt = null) => {
   modalMode.value = mode
@@ -92,21 +99,22 @@ const openModal = (mode, receipt = null) => {
       
       const stock = stockList.value.find(s => s.variantId === variantId && s.locationId === (i.locationId||i.LocationId) && s.nsx === (i.nsx||i.Nsx)?.split('T')[0] && s.hsd === (i.hsd||i.Hsd)?.split('T')[0])
       const available = stock ? stock.qtyAvailable : 0;
-      
+      const convRate = prod.conversionRate || prod.ConversionRate || 24;
+
       return {
         variantId: variantId, sku: prod.sku || prod.Sku || (i.sku || i.Sku), name: prod.name || prod.Name || (i.name || i.Name), 
         unit: prod.unit || prod.Unit || (i.unit || i.Unit), 
         qty: i.qty || i.Qty, 
-        boxQty: i.qty || i.Qty, // Mặc định số thùng = tổng SL (khi xem lại)
-        conversionRate: 1,      // Mặc định quy đổi 1 thùng = 1 món
+        boxQty: Math.floor((i.qty || i.Qty) / convRate), 
+        conversionRate: convRate,      
         maxQty: available + (i.qty || i.Qty), 
         price: i.price || i.Price, 
         locationId: i.locationId || i.LocationId, locationCode: loc.code || loc.Code || 'Khu chung',
         nsx: i.nsx || i.Nsx ? (i.nsx || i.Nsx).split('T')[0] : '', hsd: i.hsd || i.Hsd ? (i.hsd || i.Hsd).split('T')[0] : ''
       };
     });
-    formData.value = { id: receipt.id || receipt.Id, code: receipt.code || receipt.Code, date: receipt.date || receipt.Date, customerId: receipt.customerId || receipt.CustomerId, items: safeItems, note: receipt.note || receipt.Note, status: receipt.status || receipt.Status };
-  } else { formData.value = { id: 0, code: '', date: getToday(), customerId: '', items: [], note: '', status: 'pending' } }
+    formData.value = { id: receipt.id || receipt.Id, code: receipt.code || receipt.Code, date: receipt.date || receipt.Date, customerId: receipt.customerId || receipt.CustomerId, warehouseId: receipt.warehouseId || receipt.WarehouseId || myWarehouseId.value, items: safeItems, note: receipt.note || receipt.Note, status: receipt.status || receipt.Status };
+  } else { formData.value = { id: 0, code: '', date: getToday(), customerId: '', warehouseId: myWarehouseId.value, items: [], note: '', status: 'pending' } }
   selectedStockIdsToAdd.value = []; stockSearchQuery.value = ''; showModal.value = true
 }
 const closeModal = () => showModal.value = false
@@ -141,9 +149,9 @@ const handleAddMultipleStocks = () => {
       if(!exists) {
         formData.value.items.push({ 
           variantId: stock.variantId, sku: stock.sku, name: stock.name, unit: stock.unit, 
-          conversionRate: 1, // Quy đổi mặc định: 1 thùng = 1 sản phẩm
-          boxQty: 1,         // Số thùng mặc định = 1
-          qty: 1,            // Tổng SL xuất = 1 * 1 = 1
+          conversionRate: stock.conversionRate, 
+          boxQty: 1,                 
+          qty: 1 * stock.conversionRate,            
           maxQty: stock.qtyAvailable, 
           price: stock.price, locationId: stock.locationId, locationCode: stock.locationCode, 
           nsx: stock.nsx, hsd: stock.hsd 
@@ -154,7 +162,6 @@ const handleAddMultipleStocks = () => {
   selectedStockIdsToAdd.value = []; stockSearchQuery.value = '' 
 }
 
-// HÀM TỰ ĐỘNG TÍNH TOÁN QUY ĐỔI VÀ CHẶN SỐ LƯỢNG
 const calculateQty = (item) => {
     item.qty = (item.boxQty || 0) * (item.conversionRate || 1);
     if(item.qty > item.maxQty) {
@@ -177,7 +184,10 @@ const handleSubmit = async () => {
   try {
     const method = modalMode.value === 'add' ? 'POST' : 'PUT'
     const url = modalMode.value === 'add' ? OUTBOUND_API : `${OUTBOUND_API}/${formData.value.id}`
-    const payload = { ...formData.value }; if (modalMode.value === 'add') payload.code = ""; 
+    const payload = { ...formData.value }; 
+    if (modalMode.value === 'add') payload.code = ""; 
+    payload.warehouseId = myWarehouseId.value || 1; // Gắn ID kho khi tạo phiếu
+    
     const res = await fetch(url, { method, headers: getAuthHeaders(), body: JSON.stringify(payload) })
     if (res.ok) { alert('Lưu Phiếu thành công!'); await fetchData(); closeModal(); } 
     else { let errMsg = "Lỗi hệ thống!"; try { const text = await res.text(); if (text) errMsg = JSON.parse(text).message || errMsg; } catch(e) {} alert('LỖI: ' + errMsg); }
@@ -209,7 +219,10 @@ onMounted(() => fetchData())
 <template>
   <div class="space-y-6 animate-fade-in pb-10 px-1 relative">
     <div class="flex justify-between items-center">
-      <div><h2 class="text-2xl font-bold text-gray-800">Phiếu Xuất kho (Outbound)</h2></div>
+      <div>
+        <h2 class="text-2xl font-bold text-gray-800">Phiếu Xuất kho</h2>
+        <p class="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded inline-block mt-1 border border-indigo-200 uppercase">Kho ID: {{ myWarehouseId || 'Tất cả Kho (Admin)' }}</p>
+      </div>
       
       <div class="flex gap-2">
         <button @click="() => alert('Đang xuất báo cáo Excel...')" class="bg-white border border-gray-200 text-emerald-600 px-3 py-2 rounded-lg text-sm font-semibold hover:bg-emerald-50 transition-colors shadow-sm flex items-center gap-1.5">
@@ -231,6 +244,7 @@ onMounted(() => fetchData())
       <div class="w-full overflow-x-auto">
         <table class="w-full text-sm text-left"><thead class="bg-gray-50 uppercase font-bold text-gray-500 text-xs"><tr><th class="px-5 py-3">Mã Phiếu</th><th class="px-5 py-3">Ngày</th><th class="px-5 py-3">Khách hàng</th><th class="px-5 py-3 text-right">Tổng SL</th><th class="px-5 py-3 text-right">Giá trị</th><th class="px-5 py-3 text-center">Trạng thái</th><th class="px-5 py-3 text-right">Thao tác</th></tr></thead>
           <tbody class="divide-y divide-gray-100">
+            <tr v-if="filteredReceipts.length === 0"><td colspan="7" class="px-6 py-12 text-center text-gray-500">Kho này chưa xuất phiếu nào.</td></tr>
             <tr v-for="receipt in filteredReceipts" :key="receipt.id || receipt.Id" class="hover:bg-gray-50">
               <td class="px-5 py-3 font-bold text-amber-700">{{ receipt.code || receipt.Code }}</td><td class="px-5 py-3">{{ receipt.date || receipt.Date }}</td><td class="px-5 py-3 font-bold">{{ getCustomerName(receipt.customerId || receipt.CustomerId) }}</td><td class="px-5 py-3 text-right font-bold">{{ receipt.totalQty || receipt.TotalQty }}</td><td class="px-5 py-3 text-right font-bold text-emerald-600">{{ formatCurrency(receipt.totalPrice || receipt.TotalPrice) }}</td>
               <td class="px-5 py-3 text-center"><span :class="['px-2 py-1 rounded text-[10px] font-bold uppercase border', getStatusBadge(receipt.status || receipt.Status).class]">{{ getStatusBadge(receipt.status || receipt.Status).text }}</span></td>
@@ -262,7 +276,7 @@ onMounted(() => fetchData())
             </div>
 
             <div v-if="modalMode !== 'view'" class="bg-amber-50 p-4 rounded-xl border border-amber-100">
-              <label class="text-sm font-bold text-amber-800 mb-2 block">Tra cứu & Chọn hàng TỪ TỒN KHO THỰC TẾ:</label>
+              <label class="text-sm font-bold text-amber-800 mb-2 block">Tra cứu & Chọn hàng TỪ TỒN KHO CỦA KHO NÀY:</label>
               <input v-model="stockSearchQuery" type="text" class="w-full border border-amber-200 rounded px-3 py-1.5 text-sm mb-2 outline-none focus:ring-1 focus:ring-amber-500 shadow-sm" placeholder="🔍 Gõ mã SKU, tên SP hoặc mã Kệ để tìm hàng đang có trong kho...">
               <div class="bg-white border border-amber-200 rounded max-h-32 overflow-y-auto p-2">
                 <div v-if="filteredStockList.length === 0" class="p-2 text-sm text-gray-400 italic">Kho đang trống hoặc không tìm thấy.</div>

@@ -8,7 +8,7 @@ import {
   ArrowDownTrayIcon, ArrowUpTrayIcon, TruckIcon, ExclamationTriangleIcon, ShoppingCartIcon,
   ClipboardDocumentCheckIcon, ArchiveBoxIcon, DocumentTextIcon, BellAlertIcon, MapPinIcon,
   ChartPieIcon, ChartBarIcon, Bars3Icon, ComputerDesktopIcon,
-  CheckBadgeIcon // Icon mới cho chức năng Duyệt phiếu
+  CheckBadgeIcon, ArrowsRightLeftIcon
 } from '@heroicons/vue/24/outline'
 
 const router = useRouter()
@@ -20,39 +20,40 @@ const handleResize = () => { isCollapsed.value = window.innerWidth < 1024 }
 onMounted(() => window.addEventListener('resize', handleResize))
 onUnmounted(() => window.removeEventListener('resize', handleResize))
 
-// ĐÃ CẬP NHẬT: Thêm Duyệt phiếu tổng, Nhật ký UI, Rút quyền GĐ/GĐCN khỏi các menu lắt nhắt
+// ĐÃ DỌN DẸP SẠCH QUYỀN CỦA 'admin' KHỎI CÁC CHỨC NĂNG NGHIỆP VỤ KHO
 const menuItems = [
   { name: 'Trang chủ', path: '/home', icon: HomeIcon, roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho', 'nv_kho'] },
   
-  // Nhóm A
+  // Nhóm A: Quản trị Hệ thống (Admin giữ quyền)
   { name: 'Nhân sự & Phân quyền', path: '/employees', icon: UserGroupIcon, roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho'] },
   { name: 'Chi nhánh & Kho', path: '/branches', icon: BuildingOfficeIcon, roles: ['admin', 'giam_doc', 'gd_chi_nhanh'] },
   { name: 'Nhật ký hệ thống', path: '/audit-logs', icon: ClipboardDocumentListIcon, roles: ['admin'] },
   
-  // Nhóm B
+  // Nhóm B: Thiết lập Danh mục (Admin thiết lập ban đầu)
   { name: 'Danh mục chung', path: '/categories', icon: ListBulletIcon, roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho'] },
-  { name: 'Sản phẩm (SKU)', path: '/products', icon: CubeIcon, roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho'] },
-  { name: 'Sơ đồ kho', path: '/warehouse-map', icon: Squares2X2Icon, roles: ['admin', 'ql_kho'] },
+  { name: 'Sản phẩm', path: '/products', icon: CubeIcon, roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho'] },
   { name: 'Đối tác (KH/NCC)', path: '/partners', icon: IdentificationIcon, roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho'] },
   
-  // Nhóm C
-  { name: 'Duyệt phiếu tổng', path: '/approvals', icon: CheckBadgeIcon, roles: ['admin', 'giam_doc', 'gd_chi_nhanh'] }, // Tính năng mới cho Sếp
-  { name: 'Phiếu Nhập', path: '/inbound', icon: ArrowDownTrayIcon, roles: ['admin', 'ql_kho'] }, 
-  { name: 'Phiếu Xuất', path: '/outbound', icon: ArrowUpTrayIcon, roles: ['admin', 'ql_kho'] }, 
-  { name: 'Điều chuyển', path: '/transfer', icon: TruckIcon, roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho'] },
-  { name: 'Hàng lỗi', path: '/defects', icon: ExclamationTriangleIcon, roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho', 'nv_kho'] },
-  { name: 'Đặt hàng PO', path: '/purchase-orders', icon: ShoppingCartIcon, roles: ['admin', 'giam_doc', 'ql_kho'] },
-  { name: 'Kiểm kê', path: '/inventory-check', icon: ClipboardDocumentCheckIcon, roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho'] },
+  // Nhóm C: Nghiệp Vụ Kho (ĐÃ XÓA ADMIN)
+  { name: 'Sơ đồ kho', path: '/warehouse-map', icon: Squares2X2Icon, roles: ['ql_kho'] },
+  { name: 'Duyệt phiếu tổng', path: '/approvals', icon: CheckBadgeIcon, roles: ['giam_doc', 'gd_chi_nhanh'] },
+  { name: 'Phiếu Nhập', path: '/inbound', icon: ArrowDownTrayIcon, roles: ['ql_kho'] }, 
+  { name: 'Phiếu Xuất', path: '/outbound', icon: ArrowUpTrayIcon, roles: ['ql_kho'] }, 
+  { name: 'Điều chuyển', path: '/transfer', icon: TruckIcon, roles: ['giam_doc', 'gd_chi_nhanh', 'ql_kho'] },
+  { name: 'Kho bãi', path: '/putaway', icon: ArrowsRightLeftIcon, roles: ['ql_kho', 'nv_kho'] },
+  { name: 'Hàng lỗi', path: '/defects', icon: ExclamationTriangleIcon, roles: ['giam_doc', 'gd_chi_nhanh', 'ql_kho', 'nv_kho'] },
+  { name: 'Đặt hàng PO', path: '/purchase-orders', icon: ShoppingCartIcon, roles: ['giam_doc', 'ql_kho'] },
+  { name: 'Kiểm kê', path: '/inventory-check', icon: ClipboardDocumentCheckIcon, roles: ['giam_doc', 'gd_chi_nhanh', 'ql_kho'] },
   
-  // Nhóm D
-  { name: 'Tra cứu Tồn kho', path: '/stock', icon: ArchiveBoxIcon, roles: ['admin', 'ql_kho', 'nv_kho'] }, 
-  { name: 'Sổ giao dịch', path: '/transactions', icon: DocumentTextIcon, roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho'] },
-  { name: 'Cảnh báo tồn kho', path: '/alerts', icon: BellAlertIcon, roles: ['admin', 'ql_kho'] }, 
-  { name: 'Vị trí lưu kho', path: '/locations', icon: MapPinIcon, roles: ['admin', 'ql_kho', 'nv_kho'] }, 
+  // Nhóm D: Tra cứu (ĐÃ XÓA ADMIN)
+  { name: 'Tra cứu Tồn kho', path: '/stock', icon: ArchiveBoxIcon, roles: ['ql_kho', 'nv_kho'] }, 
+  { name: 'Sổ giao dịch', path: '/transactions', icon: DocumentTextIcon, roles: ['giam_doc', 'gd_chi_nhanh', 'ql_kho'] },
+  { name: 'Cảnh báo tồn kho', path: '/alerts', icon: BellAlertIcon, roles: ['ql_kho'] }, 
+  { name: 'Vị trí lưu kho', path: '/locations', icon: MapPinIcon, roles: ['ql_kho', 'nv_kho'] }, 
   
-  // Nhóm E
-  { name: 'Dashboard (Biểu đồ)', path: '/dashboard', icon: ChartPieIcon, roles: ['admin', 'giam_doc', 'gd_chi_nhanh'] },
-  { name: 'Báo cáo Xuất/Nhập', path: '/reports', icon: ChartBarIcon, roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho'] },
+  // Nhóm E: Báo cáo & Log
+  { name: 'Dashboard', path: '/dashboard', icon: ChartPieIcon, roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho'] }, // Giữ admin ở Dashboard để xem Health tổng quan hệ thống
+  { name: 'Báo cáo Xuất/Nhập', path: '/reports', icon: ChartBarIcon, roles: ['giam_doc', 'gd_chi_nhanh', 'ql_kho'] }, // ĐÃ XÓA ADMIN
   { name: 'Nhật ký UI', path: '/ui-logs', icon: ComputerDesktopIcon, roles: ['admin'] }
 ]
 

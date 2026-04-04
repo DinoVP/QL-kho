@@ -1,6 +1,19 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
-import { MagnifyingGlassIcon, PlusIcon, MapPinIcon, XMarkIcon, QrCodeIcon, CubeIcon, ScaleIcon, PencilSquareIcon, TrashIcon, AdjustmentsHorizontalIcon } from '@heroicons/vue/24/outline'
+import { ref, onMounted, computed } from 'vue'
+import { 
+  MagnifyingGlassIcon, PlusIcon, Squares2X2Icon, MapIcon, 
+  TableCellsIcon, XMarkIcon, PencilSquareIcon, TrashIcon, 
+  MapPinIcon, ArchiveBoxArrowDownIcon, ArrowUpOnSquareStackIcon,
+  QrCodeIcon, CubeIcon
+} from '@heroicons/vue/24/outline'
+import { uiLogger } from '@/utils/logger'
+import { useAuth } from '@/composables/useAuth' 
+
+const { currentUserRole } = useAuth()
+const canEdit = computed(() => ['admin', 'giam_doc', 'ql_kho'].includes(currentUserRole.value))
+
+// LẤY ID KHO CỦA NGƯỜI ĐANG DÙNG
+const myWarehouseId = ref(parseInt(localStorage.getItem('warehouseId')) || null)
 
 const API_URL = 'https://localhost:7139/api/Locations'
 const PROD_API_URL = 'https://localhost:7139/api/Products'
@@ -23,7 +36,11 @@ const fetchData = async () => {
       fetch(PROD_API_URL, { headers })
     ])
     if (prodRes.ok) productsList.value = await prodRes.json()
-    if (locRes.ok) locations.value = await locRes.json()
+    if (locRes.ok) {
+        const allLocs = await locRes.json()
+        // LỌC CHẶT CHẼ: CHỈ HIỆN VỊ TRÍ CỦA KHO MÌNH
+        locations.value = allLocs.filter(l => l.warehouseId === myWarehouseId.value || !myWarehouseId.value)
+    }
   } catch (error) { console.error('Lỗi tải dữ liệu:', error) }
   finally { isLoading.value = false }
 }
@@ -76,7 +93,6 @@ const showModal = ref(false)
 const formData = ref({ id: null, code: '', rack: '', maxWeight: 500 })
 
 const openModal = (loc) => {
-  // Gắn đúng dữ liệu của dòng đang chọn vào Form
   formData.value = { 
     id: loc.id, 
     code: loc.code, 
@@ -130,8 +146,9 @@ onMounted(() => { fetchData() })
   <div class="space-y-5 md:space-y-6 animate-fade-in pb-10 px-0 md:px-1 relative">
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
       <div>
-        <h2 class="text-xl md:text-2xl font-bold text-gray-800">Chi tiết Vị trí (Bin Locations)</h2>
+        <h2 class="text-xl md:text-2xl font-bold text-gray-800">Chi tiết Vị trí</h2>
         <p class="text-xs md:text-sm text-gray-500 mt-1">Giám sát tải trọng thực tế của từng Vị trí Kệ hàng bằng <strong class="text-indigo-600">Thanh tiến độ (Progress)</strong></p>
+        <p class="text-xs md:text-sm text-indigo-600 font-bold bg-indigo-50 inline-block px-3 py-1 rounded-full mt-2 border border-indigo-200">Đang xem dữ liệu của Kho ID: {{ myWarehouseId || 'Tất cả Kho (Admin)' }}</p>
       </div>
       <div class="flex gap-2">
         <button class="bg-white border border-gray-300 text-gray-700 px-4 py-2.5 rounded-lg text-sm font-semibold hover:bg-gray-50 transition-colors shadow-sm flex items-center gap-2">
@@ -168,7 +185,7 @@ onMounted(() => { fetchData() })
             <tr v-else-if="filteredLocations.length === 0">
               <td colspan="6" class="px-6 py-16 text-center">
                 <MapPinIcon class="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                <h3 class="text-base font-semibold text-gray-700">Chưa có vị trí lưu kho nào</h3>
+                <h3 class="text-base font-semibold text-gray-700">Kho này chưa có vị trí lưu kho nào</h3>
               </td>
             </tr>
             <tr v-for="loc in filteredLocations" :key="loc.id" class="hover:bg-gray-50">
@@ -264,4 +281,4 @@ onMounted(() => { fetchData() })
 .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
 .animate-fade-in { animation: fadeIn 0.2s ease-out; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
-</style>   
+</style>

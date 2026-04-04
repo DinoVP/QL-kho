@@ -24,11 +24,33 @@ const handleLogin = async () => {
   const result = await login(username.value, password.value)
 
   if (result.success) {
+    // =========================================================================
+    // MẤU CHỐT Ở ĐÂY: LƯU MÃ KHO VÀ CHI NHÁNH VÀO BỘ NHỚ TRÌNH DUYỆT
+    // =========================================================================
+    // Dữ liệu API trả về thường nằm trong result.data hoặc result.user
+    const userData = result.data || result.user; 
+    
+    if (userData) {
+        // Lưu Role phân quyền
+        if (userData.roleCode || userData.RoleCode) {
+            localStorage.setItem('role', userData.roleCode || userData.RoleCode);
+        }
+        // Lưu ID Chi nhánh
+        if (userData.branchId || userData.BranchId) {
+            localStorage.setItem('branchId', userData.branchId || userData.BranchId);
+        }
+        // Lưu ID Kho (QUAN TRỌNG NHẤT ĐỂ TÁCH DỮ LIỆU)
+        if (userData.warehouseId || userData.WarehouseId) {
+            localStorage.setItem('warehouseId', userData.warehouseId || userData.WarehouseId);
+        }
+    }
+    // =========================================================================
+
     alert("Đăng nhập thành công")
-    // Đẩy sang trang Phiếu Nhập (Hoặc trang Dashboard của sếp)
+    // Đẩy sang trang Phiếu Nhập (Hoặc trang Trang chủ /home của sếp)
     router.push('/inbound') 
   } else {
-    errorMessage.value = result.message
+    errorMessage.value = result.message || "Tài khoản hoặc mật khẩu không đúng!"
   }
   
   isLoading.value = false
