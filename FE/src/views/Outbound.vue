@@ -38,10 +38,13 @@ const fetchData = async () => {
       customers.value = rawPartners.filter(p => p.isCustomer || p.partnerCode?.startsWith('KH'))
     }
     
-    // LOAD TỒN KHO THỰC TẾ (Lọc đúng kho mình)
+    // LOAD TỒN KHO THỰC TẾ (ĐÃ CHẶN LỌC CHỈ LẤY HÀNG ĐÃ LÊN KỆ)
     if (stockRes.ok) {
       const rawStocks = await stockRes.json();
-      const filteredStocks = rawStocks.filter(s => !myWarehouseId.value || s.warehouseId === myWarehouseId.value || s.WarehouseId === myWarehouseId.value)
+      const filteredStocks = rawStocks.filter(s => 
+        (!myWarehouseId.value || s.warehouseId === myWarehouseId.value || s.WarehouseId === myWarehouseId.value) &&
+        (s.locationId != null && s.locationId !== '') // <-- MÀNG LỌC BỌC THÉP: Bắt buộc phải có vị trí Kệ
+      )
       
       stockList.value = filteredStocks.map(s => {
         const prod = productsList.value.find(p => p.id === s.variantId || p.Id === s.variantId) || {};
@@ -51,7 +54,7 @@ const fetchData = async () => {
           nsx: s.nsx || '', hsd: s.hsd || '',
           sku: prod.sku || prod.Sku || 'N/A', name: prod.name || prod.Name || 'Lỗi', unit: prod.unit || prod.Unit || 'Cái',
           price: prod.price || prod.Price || 0, conversionRate: prod.conversionRate || prod.ConversionRate || 24,
-          locationId: s.locationId, locationCode: loc.code || loc.Code || 'Khu chung'
+          locationId: s.locationId, locationCode: loc.code || loc.Code || 'Lỗi vị trí'
         }
       })
     }
@@ -109,7 +112,7 @@ const openModal = (mode, receipt = null) => {
         conversionRate: convRate,      
         maxQty: available + (i.qty || i.Qty), 
         price: i.price || i.Price, 
-        locationId: i.locationId || i.LocationId, locationCode: loc.code || loc.Code || 'Khu chung',
+        locationId: i.locationId || i.LocationId, locationCode: loc.code || loc.Code || 'Lỗi vị trí',
         nsx: i.nsx || i.Nsx ? (i.nsx || i.Nsx).split('T')[0] : '', hsd: i.hsd || i.Hsd ? (i.hsd || i.Hsd).split('T')[0] : ''
       };
     });
@@ -129,7 +132,7 @@ const getStatusBadge = (status) => {
   }
 }
 
-// BỘ LỌC CHỌN TỪ TỒN KHO
+// BỘ LỌC CHỌN TỪ TỒN KHO ĐÃ LÊN KỆ
 const stockSearchQuery = ref(''); const selectedStockIdsToAdd = ref([]) 
 const filteredStockList = computed(() => {
   if (!stockSearchQuery.value) return stockList.value;
@@ -165,7 +168,7 @@ const handleAddMultipleStocks = () => {
 const calculateQty = (item) => {
     item.qty = (item.boxQty || 0) * (item.conversionRate || 1);
     if(item.qty > item.maxQty) {
-        alert(`[LỖI] Sếp xuất ${item.qty} ${item.unit} nhưng Tồn kho lô này chỉ còn ${item.maxQty} ${item.unit} thôi! Hệ thống sẽ tự trả về mức tối đa.`);
+        alert(`[LỖI] Sếp xuất ${item.qty} ${item.unit} nhưng Kệ này chỉ còn ${item.maxQty} ${item.unit} thôi! Hệ thống sẽ tự trả về mức tối đa.`);
         item.boxQty = Math.floor(item.maxQty / (item.conversionRate || 1));
         item.qty = item.boxQty * (item.conversionRate || 1);
     }
@@ -201,7 +204,7 @@ const handleDelete = async (id, code) => {
 }
 
 const handleCompleteReceipt = async (receipt) => {
-  if (!confirm(`Xác nhận phiếu [${receipt.code || receipt.Code}] ĐÃ XUẤT KHO? (Hàng sẽ bị trừ VĨNH VIỄN khỏi DB Tồn Kho)`)) return;
+  if (!confirm(`Xác nhận phiếu [${receipt.code || receipt.Code}] ĐÃ XUẤT KHO? (Hàng sẽ bị trừ VĨNH VIỄN khỏi Kệ này)`)) return;
   try {
     const res = await fetch(`${OUTBOUND_API}/${receipt.id || receipt.Id}/complete`, { method: 'PUT', headers: getAuthHeaders() })
     if (res.ok) { 
@@ -276,10 +279,10 @@ onMounted(() => fetchData())
             </div>
 
             <div v-if="modalMode !== 'view'" class="bg-amber-50 p-4 rounded-xl border border-amber-100">
-              <label class="text-sm font-bold text-amber-800 mb-2 block">Tra cứu & Chọn hàng TỪ TỒN KHO CỦA KHO NÀY:</label>
-              <input v-model="stockSearchQuery" type="text" class="w-full border border-amber-200 rounded px-3 py-1.5 text-sm mb-2 outline-none focus:ring-1 focus:ring-amber-500 shadow-sm" placeholder="🔍 Gõ mã SKU, tên SP hoặc mã Kệ để tìm hàng đang có trong kho...">
+              <label class="text-sm font-bold text-amber-800 mb-2 block">Tra cứu & Chọn hàng ĐÃ ĐƯỢC LÊN KỆ (Bãi chờ không hợp lệ):</label>
+              <input v-model="stockSearchQuery" type="text" class="w-full border border-amber-200 rounded px-3 py-1.5 text-sm mb-2 outline-none focus:ring-1 focus:ring-amber-500 shadow-sm" placeholder="🔍 Gõ mã SKU, tên SP... (Chỉ hiển thị hàng có Mã Kệ)">
               <div class="bg-white border border-amber-200 rounded max-h-32 overflow-y-auto p-2">
-                <div v-if="filteredStockList.length === 0" class="p-2 text-sm text-gray-400 italic">Kho đang trống hoặc không tìm thấy.</div>
+                <div v-if="filteredStockList.length === 0" class="p-2 text-sm text-gray-400 italic">Kho đang trống hoặc toàn bộ hàng đang ở Bãi Chờ (Chưa cất lên kệ).</div>
                 <label v-for="stock in filteredStockList" :key="stock.stockId" class="flex items-center gap-3 p-2 hover:bg-amber-50 cursor-pointer border-b">
                   <input type="checkbox" :value="stock.stockId" v-model="selectedStockIdsToAdd" class="w-4 h-4 text-amber-600 rounded">
                   <span class="text-sm flex-1 font-medium">[{{ stock.sku }}] {{ stock.name }} <span class="text-indigo-600 font-bold ml-2">(Kệ: {{ stock.locationCode }})</span></span>

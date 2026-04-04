@@ -31,9 +31,13 @@ namespace BE.Controllers
                 Name = v.Product?.ProductName ?? "Sản phẩm ẩn",
                 Category = v.Product?.SubCat?.Category?.CatName ?? "Chưa phân loại",
                 Brand = v.Product?.Brand?.BrandName ?? "N/A",
-                Unit = v.Product?.UoMgroup?.GroupName ?? "Cái",
-                // Lấy trực tiếp dữ liệu từ 2 cột vừa tạo
+                Unit = v.Product?.UoMgroup?.GroupName ?? "Thùng",
+
+                // Sếp vẫn giữ PackSize cũ để không lỗi các chỗ khác
                 PackSize = v.Product?.PackSize ?? "",
+                // THÊM DÒNG NÀY: Trả về thêm tên ConversionRate để Frontend Stock.vue nhận diện được ngay!
+                ConversionRate = v.Product?.PackSize ?? "1",
+
                 Weight = v.Product?.Weight ?? 0,
                 Status = "active"
             }).ToList();
@@ -59,18 +63,17 @@ namespace BE.Controllers
                     await _context.SaveChangesAsync();
                 }
 
-                // Tự sinh mã để tránh lỗi
                 string autoCode = "SP" + DateTime.Now.ToString("ddHHmmss");
 
                 var product = new ItmProduct
                 {
-                    Sku = autoCode, // Vá lỗi UNIQUE KEY (<NULL>) ở đây!
+                    Sku = autoCode,
                     ProductName = req.Name,
                     BrandId = brand?.BrandId,
                     UoMgroupId = uom?.UoMgroupId,
                     SubCatId = subCat?.SubCatId ?? 1,
-                    PackSize = req.PackSize, // Lưu thẳng Quy cách
-                    Weight = req.Weight      // Lưu thẳng Cân nặng
+                    PackSize = req.PackSize, // Lưu thẳng Quy cách của sếp
+                    Weight = req.Weight      // Lưu thẳng Cân nặng của sếp
                 };
 
                 _context.ItmProducts.Add(product);
@@ -165,6 +168,10 @@ namespace BE.Controllers
         public string? Brand { get; set; }
         public string? Unit { get; set; }
         public string? PackSize { get; set; }
+
+        // THÊM BIẾN NÀY ĐỂ FRONTEND NHẬN DIỆN ĐƯỢC QUY CÁCH
+        public string? ConversionRate { get; set; }
+
         public decimal Weight { get; set; }
         public string? Status { get; set; }
     }
