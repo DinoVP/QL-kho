@@ -24,22 +24,40 @@ namespace BE.Controllers
                 .Include(v => v.Product).ThenInclude(p => p.SubCat).ThenInclude(sc => sc.Category)
                 .ToListAsync();
 
-            var result = variants.Select(v => new ProductSkuDto
-            {
-                Id = v.VariantId,
-                Sku = v.VariantSku,
-                Name = v.Product?.ProductName ?? "Sản phẩm ẩn",
-                Category = v.Product?.SubCat?.Category?.CatName ?? "Chưa phân loại",
-                Brand = v.Product?.Brand?.BrandName ?? "N/A",
-                Unit = v.Product?.UoMgroup?.GroupName ?? "Thùng",
+            var uomGroupIds = variants.Where(v => v.Product?.UoMgroupId != null).Select(v => v.Product.UoMgroupId).Distinct().ToList();
+            var allConversions = await _context.ItmUoMconversions.Where(c => uomGroupIds.Contains(c.UoMgroupId)).ToListAsync();
 
-                // Sếp vẫn giữ PackSize cũ để không lỗi các chỗ khác
-                PackSize = v.Product?.PackSize ?? "",
-                // THÊM DÒNG NÀY: Trả về thêm tên ConversionRate để Frontend Stock.vue nhận diện được ngay!
-                ConversionRate = v.Product?.PackSize ?? "1",
+            var result = variants.Select(v => {
+                var productConvs = allConversions.Where(c => c.UoMgroupId == v.Product?.UoMgroupId)
+                                                 .Select(c => new ConversionDto { AltUnit = c.AltUoM, Rate = c.ConvRate ?? 1 })
+                                                 .ToList();
 
-                Weight = v.Product?.Weight ?? 0,
-                Status = "active"
+                // XỬ LÝ ẨN MÃ UOM_SP ĐỂ HIỆN ĐÚNG TÊN ĐVT CƠ BẢN (VD: Lon, Cái)
+                string unitName = v.Product?.UoMgroup?.GroupName ?? "SL";
+                if (unitName.StartsWith("UOM_"))
+                {
+                    var parts = unitName.Split('_');
+                    unitName = parts.Length > 2 ? parts[2] : "SL";
+                }
+
+                string displayPackSize = productConvs.Any()
+                    ? string.Join(" | ", productConvs.Select(c => $"1 {c.AltUnit} = {c.Rate:0.##} {unitName}"))
+                    : v.Product?.PackSize ?? "";
+
+                return new ProductSkuDto
+                {
+                    Id = v.VariantId,
+                    Sku = v.VariantSku,
+                    Name = v.Product?.ProductName ?? "Sản phẩm ẩn",
+                    Category = v.Product?.SubCat?.Category?.CatName ?? "Chưa phân loại",
+                    Brand = v.Product?.Brand?.BrandName ?? "N/A",
+                    Unit = unitName, // Đã fix hiện đúng ĐVT
+                    PackSize = displayPackSize,
+                    ConversionRate = displayPackSize,
+                    Conversions = productConvs,
+                    Weight = v.Product?.Weight ?? 0,
+                    Status = "active"
+                };
             }).ToList();
 
             return Ok(result);
@@ -64,16 +82,37 @@ namespace BE.Controllers
                 }
 
                 string autoCode = "SP" + DateTime.Now.ToString("ddHHmmss");
+                int? finalUomGroupId = uom?.UoMgroupId;
+
+                if (req.Conversions != null && req.Conversions.Any())
+                {
+                    // Lưu giấu tên ĐVT Cơ bản vào cuối chuỗi để lúc GET gọi ra
+                    var customUom = new ItmUoMgroup { GroupName = "UOM_" + autoCode + "_" + req.Unit };
+                    _context.ItmUoMgroups.Add(customUom);
+                    await _context.SaveChangesAsync();
+                    finalUomGroupId = customUom.UoMgroupId;
+
+                    foreach (var c in req.Conversions)
+                    {
+                        _context.ItmUoMconversions.Add(new ItmUoMconversion
+                        {
+                            UoMgroupId = finalUomGroupId,
+                            AltUoM = c.AltUnit,
+                            ConvRate = c.Rate
+                        });
+                    }
+                    await _context.SaveChangesAsync();
+                }
 
                 var product = new ItmProduct
                 {
                     Sku = autoCode,
                     ProductName = req.Name,
                     BrandId = brand?.BrandId,
-                    UoMgroupId = uom?.UoMgroupId,
+                    UoMgroupId = finalUomGroupId,
                     SubCatId = subCat?.SubCatId ?? 1,
-                    PackSize = req.PackSize, // Lưu thẳng Quy cách của sếp
-                    Weight = req.Weight      // Lưu thẳng Cân nặng của sếp
+                    PackSize = req.PackSize,
+                    Weight = req.Weight
                 };
 
                 _context.ItmProducts.Add(product);
@@ -115,7 +154,7 @@ namespace BE.Controllers
                     var uom = await _context.ItmUoMgroups.FirstOrDefaultAsync(u => u.GroupName == req.Unit);
 
                     variant.Product.BrandId = brand?.BrandId;
-                    variant.Product.UoMgroupId = uom?.UoMgroupId;
+                    int? finalUomGroupId = uom?.UoMgroupId;
 
                     if (cat != null)
                     {
@@ -123,7 +162,39 @@ namespace BE.Controllers
                         if (subCat != null) variant.Product.SubCatId = subCat.SubCatId;
                     }
 
-                    // Cập nhật lại Quy cách và Cân nặng
+                    if (req.Conversions != null && req.Conversions.Any())
+                    {
+                        var currentUom = await _context.ItmUoMgroups.FindAsync(variant.Product.UoMgroupId);
+                        if (currentUom == null || !currentUom.GroupName.StartsWith("UOM_"))
+                        {
+                            var customUom = new ItmUoMgroup { GroupName = "UOM_" + variant.Product.Sku + "_" + req.Unit };
+                            _context.ItmUoMgroups.Add(customUom);
+                            await _context.SaveChangesAsync();
+                            finalUomGroupId = customUom.UoMgroupId;
+                        }
+                        else
+                        {
+                            // Cập nhật lại Tên ĐVT cơ bản lỡ user có đổi
+                            currentUom.GroupName = "UOM_" + variant.Product.Sku + "_" + req.Unit;
+                            finalUomGroupId = currentUom.UoMgroupId;
+                            var oldConvs = await _context.ItmUoMconversions.Where(c => c.UoMgroupId == finalUomGroupId).ToListAsync();
+                            _context.ItmUoMconversions.RemoveRange(oldConvs);
+                            await _context.SaveChangesAsync();
+                        }
+
+                        foreach (var c in req.Conversions)
+                        {
+                            _context.ItmUoMconversions.Add(new ItmUoMconversion
+                            {
+                                UoMgroupId = finalUomGroupId,
+                                AltUoM = c.AltUnit,
+                                ConvRate = c.Rate
+                            });
+                        }
+                        await _context.SaveChangesAsync();
+                    }
+
+                    variant.Product.UoMgroupId = finalUomGroupId;
                     variant.Product.PackSize = req.PackSize;
                     variant.Product.Weight = req.Weight;
                 }
@@ -168,11 +239,15 @@ namespace BE.Controllers
         public string? Brand { get; set; }
         public string? Unit { get; set; }
         public string? PackSize { get; set; }
-
-        // THÊM BIẾN NÀY ĐỂ FRONTEND NHẬN DIỆN ĐƯỢC QUY CÁCH
         public string? ConversionRate { get; set; }
-
+        public List<ConversionDto> Conversions { get; set; } = new List<ConversionDto>();
         public decimal Weight { get; set; }
         public string? Status { get; set; }
+    }
+
+    public class ConversionDto
+    {
+        public string AltUnit { get; set; }
+        public decimal Rate { get; set; }
     }
 }

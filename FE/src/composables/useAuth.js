@@ -89,19 +89,24 @@ export function useAuth() {
 
   const isLoggedIn = computed(() => !!authToken.value);
 
+  // ĐÃ THÊM QUYỀN CHO THU MUA
   const canExport = computed(() =>
-    ["admin", "giam_doc", "gd_chi_nhanh", "ql_kho"].includes(
+    ["admin", "giam_doc", "gd_chi_nhanh", "ql_kho", "nv_thu_mua"].includes(
       currentUserRole.value,
     ),
   );
+
+  // Thu mua chỉ tạo PO, không duyệt. Giám đốc duyệt.
   const canApprovePO = computed(() =>
     ["admin", "giam_doc"].includes(currentUserRole.value),
   );
+
   const canApproveOperation = computed(() =>
     ["admin", "giam_doc", "gd_chi_nhanh", "ql_kho"].includes(
       currentUserRole.value,
     ),
   );
+
   const canModifyStock = computed(() =>
     ["admin", "giam_doc", "gd_chi_nhanh", "ql_kho"].includes(
       currentUserRole.value,

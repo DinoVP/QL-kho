@@ -20,11 +20,33 @@ namespace BE.Controllers
         }
 
         // ==========================================================
-        // 1. LẤY DANH SÁCH PHIẾU NHẬP
+        // 1. LẤY DANH SÁCH PHIẾU NHẬP (TÍCH HỢP AUTO-CLEAN)
         // ==========================================================
         [HttpGet]
         public async Task<IActionResult> GetReceipts()
         {
+            // TÍNH NĂNG MỚI: DỌN RÁC NGẦM (LAZY CLEANUP)
+            // Mỗi lần mở trang, quét và xóa các phiếu "rejected" (Từ chối) quá 7 ngày
+            try
+            {
+                var sevenDaysAgo = DateTime.Now.AddDays(-7);
+                var expiredReceipts = await _context.PurReceipts
+                    .Where(r => r.Status == "rejected" && r.ReceiptDate < sevenDaysAgo)
+                    .ToListAsync();
+
+                if (expiredReceipts.Any())
+                {
+                    var expiredIds = expiredReceipts.Select(r => r.Grnid).ToList();
+                    var linesToDelete = await _context.PurReceiptLines.Where(l => expiredIds.Contains(l.Grnid ?? 0)).ToListAsync();
+
+                    _context.PurReceiptLines.RemoveRange(linesToDelete);
+                    _context.PurReceipts.RemoveRange(expiredReceipts);
+                    await _context.SaveChangesAsync();
+                }
+            }
+            catch (Exception ex) { Console.WriteLine("Lỗi dọn rác ngầm: " + ex.Message); }
+
+            // Lấy dữ liệu bình thường
             var receipts = await _context.PurReceipts
                 .Include(r => r.PurReceiptLines)
                 .OrderByDescending(r => r.Grnid)
@@ -36,7 +58,6 @@ namespace BE.Controllers
                 Code = r.Grncode,
                 Date = r.ReceiptDate?.ToString("yyyy-MM-dd") ?? "",
                 SupplierId = r.SupplierId ?? 0,
-                // Trả về WarehouseId để Frontend (Vue) thực hiện lọc dữ liệu đa kho
                 WarehouseId = r.WarehouseId,
                 Note = r.Note ?? "",
                 Status = r.Status ?? "pending",
@@ -57,7 +78,7 @@ namespace BE.Controllers
         }
 
         // ==========================================================
-        // 2. TẠO PHIẾU NHẬP MỚI (CHỜ DUYỆT)
+        // 2. TẠO PHIẾU NHẬP MỚI
         // ==========================================================
         [HttpPost]
         public async Task<IActionResult> CreateReceipt([FromBody] InboundReceiptDto req)
@@ -65,7 +86,6 @@ namespace BE.Controllers
             using var transaction = await _context.Database.BeginTransactionAsync();
             try
             {
-                // Tự sinh mã phiếu PN0001, PN0002... nếu frontend không gửi
                 string finalCode = req.Code;
                 if (string.IsNullOrEmpty(finalCode))
                 {
@@ -78,7 +98,7 @@ namespace BE.Controllers
                     Grncode = finalCode,
                     ReceiptDate = DateTime.TryParse(req.Date, out var d) ? d : DateTime.Now,
                     SupplierId = req.SupplierId,
-                    WarehouseId = req.WarehouseId, // Lưu ID kho của người tạo
+                    WarehouseId = req.WarehouseId,
                     Status = "pending",
                     Note = req.Note
                 };
@@ -95,7 +115,7 @@ namespace BE.Controllers
                             VariantId = item.VariantId,
                             ReceivedQty = Convert.ToInt32(item.Qty ?? 0),
                             Price = item.Price,
-                            LocationId = null, // Hàng mới lập phiếu chưa có kệ
+                            LocationId = null,
                             Nsx = DateTime.TryParse(item.Nsx, out var n) ? n : null,
                             Hsd = DateTime.TryParse(item.Hsd, out var h) ? h : null
                         });
@@ -114,8 +134,7 @@ namespace BE.Controllers
         }
 
         // ==========================================================
-        // 3. XÁC NHẬN NHẬP KHO (KẾT THÚC PHIẾU)
-        // Hàm này sẽ đẩy hàng vào bãi tập kết (LocationId = NULL)
+        // 3. XÁC NHẬN NHẬP KHO
         // ==========================================================
         [HttpPut("{id}/complete")]
         public async Task<IActionResult> CompleteReceipt(int id)
@@ -129,31 +148,37 @@ namespace BE.Controllers
             {
                 int safeWhId = receipt.WarehouseId ?? 1;
 
-                foreach (var item in receipt.PurReceiptLines)
+                var groupedItems = receipt.PurReceiptLines
+                    .GroupBy(l => l.VariantId)
+                    .Select(g => new {
+                        VariantId = g.Key,
+                        Nsx = g.FirstOrDefault(x => x.Nsx != null)?.Nsx,
+                        Hsd = g.FirstOrDefault(x => x.Hsd != null)?.Hsd,
+                        TotalQty = g.Sum(l => l.ReceivedQty ?? 0)
+                    }).ToList();
+
+                foreach (var item in groupedItems)
                 {
-                    // FIX LỖI UNIQUE KEY: Kiểm tra xem sản phẩm cùng NSX/HSD đã có ở bãi chờ chưa
                     var existingStock = await _context.WmsStockBalances.FirstOrDefaultAsync(s =>
                         s.VariantId == item.VariantId &&
-                        s.LocationId == null &&  // Khu chờ nhập
-                        s.WarehouseId == safeWhId &&
-                        s.Nsx == item.Nsx &&
-                        s.Hsd == item.Hsd);
+                        s.LocationId == null &&
+                        s.WarehouseId == safeWhId);
 
                     if (existingStock != null)
                     {
-                        // Đã có -> Cộng dồn số lượng
-                        existingStock.Quantity = (existingStock.Quantity ?? 0) + (item.ReceivedQty ?? 0);
+                        existingStock.Quantity = (existingStock.Quantity ?? 0) + item.TotalQty;
+                        if (item.Nsx != null) existingStock.Nsx = item.Nsx;
+                        if (item.Hsd != null) existingStock.Hsd = item.Hsd;
                         _context.WmsStockBalances.Update(existingStock);
                     }
                     else
                     {
-                        // Chưa có -> Tạo dòng tồn kho mới tại bãi tập kết (LocationId = null)
                         var newStock = new WmsStockBalance
                         {
                             VariantId = item.VariantId,
                             LocationId = null,
                             WarehouseId = safeWhId,
-                            Quantity = item.ReceivedQty ?? 0,
+                            Quantity = item.TotalQty,
                             Nsx = item.Nsx,
                             Hsd = item.Hsd
                         };
@@ -205,9 +230,6 @@ namespace BE.Controllers
         }
     }
 
-    // ==========================================================
-    // DTO MODELS
-    // ==========================================================
     public class InboundReceiptDto
     {
         public int? Id { get; set; }

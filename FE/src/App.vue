@@ -25,6 +25,7 @@ const roleDisplayName = computed(() => {
     case 'gd_chi_nhanh': return 'GĐ Chi nhánh';
     case 'ql_kho': return 'Quản lý kho';
     case 'nv_kho': return 'Nhân viên kho';
+    case 'nv_thu_mua': return 'Nhân viên thu mua'; // ĐÃ THÊM DÒNG NÀY SẾP NHÉ!
     default: return 'Khách viếng thăm';
   }
 });

@@ -18,7 +18,8 @@ const dashboardGroups = [
   {
     title: 'A — Hệ thống & phân quyền',
     items: [
-      { name: 'Đăng xuất', icon: ArrowRightOnRectangleIcon, color: 'text-red-500', path: '/login', roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho', 'nv_kho'] },
+      // ĐÃ THÊM: nv_thu_mua
+      { name: 'Đăng xuất', icon: ArrowRightOnRectangleIcon, color: 'text-red-500', path: '/login', roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho', 'nv_kho', 'nv_thu_mua'] },
       { name: 'Nhân sự & Phân quyền', icon: UserGroupIcon, color: 'text-blue-600', path: '/employees', roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho'] },
       { name: 'Chi nhánh & Kho', icon: BuildingOfficeIcon, color: 'text-indigo-500', path: '/branches', roles: ['admin', 'giam_doc', 'gd_chi_nhanh'] },
       { name: 'Nhật ký hệ thống', icon: ClipboardDocumentListIcon, color: 'text-gray-600', path: '/audit-logs', roles: ['admin'] },
@@ -27,30 +28,33 @@ const dashboardGroups = [
   {
     title: 'B — Danh mục & cấu hình',
     items: [
-      { name: 'Danh mục chung', icon: ListBulletIcon, color: 'text-purple-500', path: '/categories', roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho'] },
-      { name: 'Sản phẩm (SKU)', icon: CubeIcon, color: 'text-blue-500', path: '/products', roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho'] },
+      // ĐÃ THÊM: nv_thu_mua
+      { name: 'Danh mục chung', icon: ListBulletIcon, color: 'text-purple-500', path: '/categories', roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho', 'nv_thu_mua'] },
+      { name: 'Sản phẩm (SKU)', icon: CubeIcon, color: 'text-blue-500', path: '/products', roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho', 'nv_thu_mua'] },
       { name: 'Sơ đồ kho', icon: Squares2X2Icon, color: 'text-cyan-600', path: '/warehouse-map', roles: ['admin', 'ql_kho'] },
-      { name: 'Đối tác (KH/NCC)', icon: IdentificationIcon, color: 'text-orange-500', path: '/partners', roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho'] },
+      { name: 'Đối tác (KH/NCC)', icon: IdentificationIcon, color: 'text-orange-500', path: '/partners', roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho', 'nv_thu_mua'] },
     ]
   },
   {
     title: 'C — Nghiệp vụ kho',
     items: [
-      { name: 'Duyệt phiếu tổng', icon: CheckBadgeIcon, color: 'text-green-600', path: '/approvals', roles: ['admin', 'giam_doc', 'gd_chi_nhanh'] }, // CHỨC NĂNG SẾP LỚN
+      { name: 'Duyệt phiếu tổng', icon: CheckBadgeIcon, color: 'text-green-600', path: '/approvals', roles: ['admin', 'giam_doc', 'gd_chi_nhanh'] },
       { name: 'Phiếu Nhập', icon: ArrowDownTrayIcon, color: 'text-blue-600', path: '/inbound', roles: ['admin', 'ql_kho'] },
       { name: 'Phiếu Xuất', icon: ArrowUpTrayIcon, color: 'text-orange-500', path: '/outbound', roles: ['admin', 'ql_kho'] },
       { name: 'Điều chuyển', icon: TruckIcon, color: 'text-indigo-500', path: '/transfer', roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho'] },
       { name: 'Hàng lỗi', icon: ExclamationTriangleIcon, color: 'text-red-500', path: '/defects', roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho', 'nv_kho'] },
-      { name: 'Đặt hàng PO', icon: ShoppingCartIcon, color: 'text-amber-500', path: '/purchase-orders', roles: ['admin', 'giam_doc', 'ql_kho'] },
+      // ĐÃ THÊM: nv_thu_mua
+      { name: 'Đặt hàng PO', icon: ShoppingCartIcon, color: 'text-amber-500', path: '/purchase-orders', roles: ['admin', 'giam_doc', 'ql_kho', 'nv_thu_mua'] },
       { name: 'Kiểm kê', icon: ClipboardDocumentCheckIcon, color: 'text-teal-600', path: '/inventory-check', roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho'] },
     ]
   },
   {
     title: 'D — Tồn kho & kiểm soát',
     items: [
-      { name: 'Tra cứu Tồn kho', icon: ArchiveBoxIcon, color: 'text-blue-600', path: '/stock', roles: ['admin', 'ql_kho', 'nv_kho'] },
+      // ĐÃ THÊM: nv_thu_mua
+      { name: 'Tra cứu Tồn kho', icon: ArchiveBoxIcon, color: 'text-blue-600', path: '/stock', roles: ['admin', 'ql_kho', 'nv_kho', 'nv_thu_mua'] },
       { name: 'Sổ giao dịch', icon: DocumentTextIcon, color: 'text-indigo-500', path: '/transactions', roles: ['admin', 'giam_doc', 'gd_chi_nhanh', 'ql_kho'] },
-      { name: 'Cảnh báo tồn kho', icon: BellAlertIcon, color: 'text-red-500', path: '/alerts', roles: ['admin', 'ql_kho'] },
+      { name: 'Cảnh báo tồn kho', icon: BellAlertIcon, color: 'text-red-500', path: '/alerts', roles: ['admin', 'ql_kho', 'nv_thu_mua'] },
       { name: 'Vị trí lưu kho', icon: MapPinIcon, color: 'text-cyan-500', path: '/locations', roles: ['admin', 'ql_kho', 'nv_kho'] },
     ]
   },

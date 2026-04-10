@@ -50,7 +50,6 @@ namespace BE.Controllers
                     RackCount = _context.WmsRacks.Count(r => r.ZoneId == z.ZoneId)
                 }).ToListAsync();
 
-            // YÊU CẦU CỦA SẾP: Dãy nào không có kệ thì TỰ ĐỘNG MẤT
             var emptyZones = zones.Where(z => z.RackCount == 0).ToList();
             if (emptyZones.Any())
             {
@@ -60,7 +59,7 @@ namespace BE.Controllers
                     if (z != null) _context.WmsZones.Remove(z);
                 }
                 await _context.SaveChangesAsync();
-                zones = zones.Where(z => z.RackCount > 0).ToList(); // Lọc lại danh sách trả về
+                zones = zones.Where(z => z.RackCount > 0).ToList();
             }
 
             return Ok(zones);
@@ -102,7 +101,6 @@ namespace BE.Controllers
                 _context.WmsRacks.Add(rack);
                 await _context.SaveChangesAsync();
 
-                // Tự động sinh Ô/Vị trí (Location) dựa trên Tầng và Ô FE gửi lên
                 int tiers = req.Tiers > 0 ? req.Tiers : 4;
                 int bins = req.BinsPerTier > 0 ? req.BinsPerTier : 2;
 
@@ -125,7 +123,9 @@ namespace BE.Controllers
             catch (Exception ex) { await transaction.RollbackAsync(); return BadRequest(new { message = ex.Message }); }
         }
 
-        // ĐÃ THÊM API CẬP NHẬT KỆ (PUT) CHO SẾP
+        // ====================================================================
+        // ĐÃ SỬA LẠI TOÀN BỘ HÀM NÀY ĐỂ FIX LỖI "AN ERROR OCCURRED..." CHO SẾP
+        // ====================================================================
         [HttpPut("racks/{id}")]
         public async Task<IActionResult> UpdateRack(int id, [FromBody] RackDto req)
         {
@@ -135,25 +135,53 @@ namespace BE.Controllers
                 var rack = await _context.WmsRacks.FindAsync(id);
                 if (rack == null) return NotFound(new { message = "Không tìm thấy Kệ!" });
 
+                string oldRackCode = rack.RackCode;
                 rack.RackCode = req.Code?.ToUpper();
 
                 if (req.Tiers > 0 && req.BinsPerTier > 0)
                 {
-                    // Đập đi xây lại ô vị trí
-                    var oldLocs = _context.WmsLocations.Where(l => l.RackId == id);
-                    _context.WmsLocations.RemoveRange(oldLocs);
-                    await _context.SaveChangesAsync();
-
+                    // 1. Lấy danh sách mã Location lý thuyết theo config mới
+                    var expectedLocationCodes = new List<string>();
                     for (int t = req.Tiers; t >= 1; t--)
                     {
                         for (int b = 1; b <= req.BinsPerTier; b++)
                         {
-                            _context.WmsLocations.Add(new WmsLocation
-                            {
-                                RackId = id,
-                                LocationCode = $"{rack.RackCode}-T{t}-O{b}"
-                            });
+                            expectedLocationCodes.Add($"{rack.RackCode}-T{t}-O{b}");
                         }
+                    }
+
+                    // 2. Lấy các ô hiện tại đang có trong CSDL
+                    var existingLocs = await _context.WmsLocations.Where(l => l.RackId == id).ToListAsync();
+
+                    // Nếu đổi mã Kệ, cập nhật lại tiền tố cho các ô hiện tại
+                    if (oldRackCode != rack.RackCode)
+                    {
+                        foreach (var loc in existingLocs)
+                        {
+                            loc.LocationCode = loc.LocationCode.Replace(oldRackCode, rack.RackCode);
+                        }
+                        await _context.SaveChangesAsync();
+                    }
+
+                    // 3. TÌM VÀ XÓA NHỮNG Ô BỊ DƯ THỪA (Ví dụ kệ bị thu hẹp)
+                    var locsToRemove = existingLocs.Where(l => !expectedLocationCodes.Contains(l.LocationCode)).ToList();
+                    if (locsToRemove.Any())
+                    {
+                        _context.WmsLocations.RemoveRange(locsToRemove);
+                        await _context.SaveChangesAsync();
+                    }
+
+                    // 4. TÌM VÀ BỔ SUNG NHỮNG Ô CÒN THIẾU (Ví dụ kệ được mở rộng)
+                    var existingCodes = existingLocs.Select(l => l.LocationCode).ToList();
+                    var codesToAdd = expectedLocationCodes.Where(code => !existingCodes.Contains(code)).ToList();
+
+                    foreach (var code in codesToAdd)
+                    {
+                        _context.WmsLocations.Add(new WmsLocation
+                        {
+                            RackId = id,
+                            LocationCode = code
+                        });
                     }
                 }
 
@@ -162,7 +190,18 @@ namespace BE.Controllers
                 await WriteAuditLogAsync("UPDATE", $"Kệ hàng: {rack.RackCode}", "Cập nhật thông số Kệ.");
                 return Ok(new { message = "Cập nhật thành công!" });
             }
-            catch (Exception ex) { await transaction.RollbackAsync(); return BadRequest(new { message = ex.Message }); }
+            catch (DbUpdateException)
+            {
+                await transaction.RollbackAsync();
+                // Bắt thẳng lỗi Foreign Key nếu cố xóa ô đang có hàng
+                return BadRequest(new { message = "Lỗi Database: Kệ này đang chứa hàng, không thể xóa hoặc thu hẹp các ô đang có hàng!" });
+            }
+            catch (Exception ex)
+            {
+                await transaction.RollbackAsync();
+                var msg = ex.InnerException != null ? ex.InnerException.Message : ex.Message;
+                return BadRequest(new { message = msg });
+            }
         }
 
         [HttpDelete("racks/{id}")]
@@ -174,13 +213,11 @@ namespace BE.Controllers
             int zoneId = rack.ZoneId ?? 0;
             string code = rack.RackCode;
 
-            // Xóa Vị trí con trước khi xóa Kệ
             var locs = _context.WmsLocations.Where(l => l.RackId == id);
             _context.WmsLocations.RemoveRange(locs);
             _context.WmsRacks.Remove(rack);
             await _context.SaveChangesAsync();
 
-            // YÊU CẦU: Dọn dẹp Dãy nếu vừa xóa cái kệ cuối cùng
             bool hasRacks = await _context.WmsRacks.AnyAsync(r => r.ZoneId == zoneId);
             if (!hasRacks)
             {

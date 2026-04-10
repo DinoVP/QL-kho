@@ -84,7 +84,18 @@ namespace BE.Controllers
             using var transaction = await _context.Database.BeginTransactionAsync();
             try
             {
-                string prefix = request.RoleCode switch { "admin" => "ADM", "giam_doc" => "CEO", "gd_chi_nhanh" => "GDC", "ql_kho" => "QLK", "nv_kho" => "NVK", _ => "EMP" };
+                // ĐÃ SỬA: Thêm "nv_thu_mua" => "PUR" vào để hệ thống tự biết sinh mã
+                string prefix = request.RoleCode switch
+                {
+                    "admin" => "ADM",
+                    "giam_doc" => "CEO",
+                    "gd_chi_nhanh" => "GDC",
+                    "ql_kho" => "QLK",
+                    "nv_kho" => "NVK",
+                    "nv_thu_mua" => "PUR", // <-- Dòng ăn tiền ở đây
+                    _ => "EMP"
+                };
+
                 var lastEmp = await _context.HrmEmployees.Where(e => e.EmpCode.StartsWith(prefix)).OrderByDescending(e => e.EmpCode).FirstOrDefaultAsync();
                 string newCode = prefix + (lastEmp != null ? (int.Parse(lastEmp.EmpCode.Substring(prefix.Length)) + 1).ToString("D3") : "001");
 

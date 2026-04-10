@@ -33,10 +33,12 @@ const searchQuery = ref('')
 const filterRole = ref('')
 const filterLocation = ref('')
 
+// ĐÃ THÊM: Vai trò Nhân viên thu mua
 const roleOptions = [
   { value: 'admin', label: 'Quản trị viên' },
   { value: 'giam_doc', label: 'Giám đốc' },
   { value: 'gd_chi_nhanh', label: 'GĐ Chi nhánh' },
+  { value: 'nv_thu_mua', label: 'Nhân viên thu mua' },
   { value: 'ql_kho', label: 'Quản lý kho' },
   { value: 'nv_kho', label: 'Nhân viên kho' }
 ]
@@ -120,7 +122,8 @@ const openAssignModal = (emp) => {
 }
 
 const submitAssignWorkplace = async () => {
-  if (['gd_chi_nhanh', 'ql_kho', 'nv_kho'].includes(assignFormData.value.roleCode) && !assignFormData.value.branchId) {
+  // ĐÃ THÊM: nv_thu_mua cũng bắt buộc phải chọn Chi nhánh để làm việc
+  if (['gd_chi_nhanh', 'ql_kho', 'nv_kho', 'nv_thu_mua'].includes(assignFormData.value.roleCode) && !assignFormData.value.branchId) {
     showToast('Sếp vui lòng chọn Chi nhánh!', 'error'); return;
   }
   if (['ql_kho', 'nv_kho'].includes(assignFormData.value.roleCode) && !assignFormData.value.warehouseId) {
@@ -307,7 +310,7 @@ onMounted(() => { fetchData() })
               
               <td class="p-4 flex justify-center gap-1">
                 <button 
-                  v-if="['gd_chi_nhanh', 'ql_kho', 'nv_kho'].includes(emp.roleCode) && currentUserRole === 'admin'" 
+                  v-if="['gd_chi_nhanh', 'ql_kho', 'nv_kho', 'nv_thu_mua'].includes(emp.roleCode) && currentUserRole === 'admin'" 
                   @click="openAssignModal(emp)" 
                   title="Gán vị trí làm việc" 
                   class="text-orange-500 hover:bg-orange-100 p-2 rounded-lg transition-colors border border-transparent hover:border-orange-200"
@@ -424,7 +427,8 @@ onMounted(() => { fetchData() })
               <div class="space-y-4 bg-gray-50 p-4 rounded-xl border border-gray-200">
                 <h4 class="font-semibold text-gray-700 border-b border-gray-300 pb-2 flex items-center gap-2"><MapPinIcon class="w-4 h-4"/> Vị trí làm việc</h4>
                 <div v-if="['admin', 'giam_doc'].includes(formData.roleCode)" class="text-sm text-gray-500 italic mt-4 text-center">Quyền quản trị không gán cố định.</div>
-                <div v-if="['gd_chi_nhanh', 'ql_kho', 'nv_kho'].includes(formData.roleCode)" class="mt-2 space-y-4 animate-fade-in">
+                
+                <div v-if="['gd_chi_nhanh', 'ql_kho', 'nv_kho', 'nv_thu_mua'].includes(formData.roleCode)" class="mt-2 space-y-4 animate-fade-in">
                   <div>
                     <label class="block text-sm font-bold text-blue-700 mb-1">Chọn Chi nhánh (Tùy chọn)</label>
                     <select v-model="formData.branchId" class="w-full border border-blue-300 rounded-lg p-2.5 bg-white">
