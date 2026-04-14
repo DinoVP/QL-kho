@@ -16,7 +16,11 @@ import Outbound from "../views/Outbound.vue";
 import Transfer from "../views/Transfer.vue";
 import Putaway from "../views/Putaway.vue";
 import Defect from "../views/Defect.vue";
+
+// IMPORT CẢ 2 FILE PR VÀ PO VÀO ĐÂY
+import PurchaseRequisition from "../views/PurchaseRequisition.vue";
 import PurchaseOrder from "../views/PurchaseOrder.vue";
+
 import InventoryCheck from "../views/InventoryCheck.vue";
 import Stock from "../views/Stock.vue";
 import Transaction from "../views/Transaction.vue";
@@ -86,7 +90,6 @@ const router = createRouter({
       component: Partner,
       meta: { title: "Đối tác (KH/NCC)" },
     },
-
     {
       path: "/inbound",
       name: "inbound",
@@ -117,12 +120,23 @@ const router = createRouter({
       component: Defect,
       meta: { title: "Hàng lỗi" },
     },
+
+    // ==========================================
+    // ĐÃ TÁCH 2 ROUTE CHO PR (KHO) VÀ PO (THU MUA)
+    // ==========================================
+    {
+      path: "/purchase-requisition",
+      name: "purchase-requisition",
+      component: PurchaseRequisition,
+      meta: { title: "Yêu cầu mua hàng (PR)" },
+    },
     {
       path: "/purchase-orders",
       name: "purchase-orders",
       component: PurchaseOrder,
-      meta: { title: "Đặt hàng PO" },
+      meta: { title: "Đơn đặt hàng (PO)" },
     },
+
     {
       path: "/inventory-check",
       name: "inventory-check",
@@ -165,7 +179,6 @@ const router = createRouter({
       component: Reports,
       meta: { title: "Báo cáo xuất/nhập" },
     },
-
     {
       path: "/approvals",
       name: "approvals",
@@ -183,17 +196,11 @@ const router = createRouter({
 
 // === AUTO BẮT SỰ KIỆN KHI CHUYỂN TRANG ===
 router.afterEach((to, from) => {
-  // Bỏ qua nếu F5 tại chỗ (đường dẫn không đổi)
   if (to.path === from.path) return;
-
-  // Lấy Tên Tiếng Việt từ thuộc tính 'meta', nếu không có thì để là 'bên ngoài'
   const fromName = from.meta?.title || "Bên ngoài";
   const toName = to.meta?.title || "Không xác định";
-
-  // Nối chuỗi đúng chuẩn tiếng Việt theo ý bạn (dùng toLowerCase để chữ thường dễ đọc)
   const message = `Người dùng điều hướng từ trang ${fromName.toLowerCase()} sang trang ${toName.toLowerCase()}`;
 
-  // Gọi hàm log bắn xuống Backend
   uiLogger.log("NAVIGATION", to.path, message, {
     fromPath: from.path,
     toPath: to.path,

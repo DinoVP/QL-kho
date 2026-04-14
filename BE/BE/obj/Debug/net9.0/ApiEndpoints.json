@@ -842,7 +842,7 @@
   },
   {
     "ContainingType": "BE.Controllers.PoController",
-    "Method": "GetPOs",
+    "Method": "GetOrders",
     "RelativePath": "api/Po",
     "HttpMethod": "GET",
     "IsController": true,
@@ -852,7 +852,7 @@
   },
   {
     "ContainingType": "BE.Controllers.PoController",
-    "Method": "CreatePO",
+    "Method": "CreateOrder",
     "RelativePath": "api/Po",
     "HttpMethod": "POST",
     "IsController": true,
@@ -868,7 +868,7 @@
   },
   {
     "ContainingType": "BE.Controllers.PoController",
-    "Method": "UpdatePO",
+    "Method": "UpdateOrder",
     "RelativePath": "api/Po/{id}",
     "HttpMethod": "PUT",
     "IsController": true,
@@ -889,7 +889,7 @@
   },
   {
     "ContainingType": "BE.Controllers.PoController",
-    "Method": "DeletePO",
+    "Method": "DeleteOrder",
     "RelativePath": "api/Po/{id}",
     "HttpMethod": "DELETE",
     "IsController": true,
@@ -905,8 +905,8 @@
   },
   {
     "ContainingType": "BE.Controllers.PoController",
-    "Method": "ApprovePO",
-    "RelativePath": "api/Po/{id}/approve",
+    "Method": "UpdateStatus",
+    "RelativePath": "api/Po/{id}/status",
     "HttpMethod": "PUT",
     "IsController": true,
     "Order": 0,
@@ -915,37 +915,10 @@
         "Name": "id",
         "Type": "System.Int32",
         "IsRequired": true
-      }
-    ],
-    "ReturnTypes": []
-  },
-  {
-    "ContainingType": "BE.Controllers.PoController",
-    "Method": "CompletePO",
-    "RelativePath": "api/Po/{id}/complete",
-    "HttpMethod": "PUT",
-    "IsController": true,
-    "Order": 0,
-    "Parameters": [
+      },
       {
-        "Name": "id",
-        "Type": "System.Int32",
-        "IsRequired": true
-      }
-    ],
-    "ReturnTypes": []
-  },
-  {
-    "ContainingType": "BE.Controllers.PoController",
-    "Method": "SendPO",
-    "RelativePath": "api/Po/{id}/send",
-    "HttpMethod": "PUT",
-    "IsController": true,
-    "Order": 0,
-    "Parameters": [
-      {
-        "Name": "id",
-        "Type": "System.Int32",
+        "Name": "newStatus",
+        "Type": "System.String",
         "IsRequired": true
       }
     ],
@@ -1112,6 +1085,22 @@
     "ContainingType": "BE.Controllers.TransferController",
     "Method": "CompleteTransfer",
     "RelativePath": "api/Transfer/{id}/complete",
+    "HttpMethod": "PUT",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Int32",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "BE.Controllers.TransferController",
+    "Method": "ShippingTransfer",
+    "RelativePath": "api/Transfer/{id}/shipping",
     "HttpMethod": "PUT",
     "IsController": true,
     "Order": 0,

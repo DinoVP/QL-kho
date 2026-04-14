@@ -28,8 +28,8 @@ namespace BE.Controllers
                 Id = t.TransferId,
                 Code = t.TransferCode ?? $"DC{t.TransferId.ToString().PadLeft(4, '0')}",
                 Date = t.TransferDate?.ToString("yyyy-MM-dd") ?? "",
-                FromWarehouseId = t.FromWh, // Trả về ID kho xuất để Giao diện map tên
-                ToWarehouseId = t.ToWh,     // Trả về ID kho nhập để Giao diện map tên
+                FromWarehouseId = t.FromWh,
+                ToWarehouseId = t.ToWh,
                 Note = t.Note ?? "",
                 Status = t.Status ?? "pending",
                 Items = t.WmsTransferLines.Select(l => new TransferItemDto
@@ -63,8 +63,8 @@ namespace BE.Controllers
                 {
                     TransferCode = finalCode,
                     TransferDate = DateTime.TryParse(req.Date, out var d) ? d : DateTime.Now,
-                    FromWh = req.FromWarehouseId, // Lưu ID kho xuất vào DB
-                    ToWh = req.ToWarehouseId,     // Lưu ID kho nhập vào DB
+                    FromWh = req.FromWarehouseId,
+                    ToWh = req.ToWarehouseId,
                     Status = "pending",
                     Note = req.Note
                 };
@@ -101,6 +101,29 @@ namespace BE.Controllers
             }
         }
 
+        // =======================================================================
+        // API: XÁC NHẬN KHO XUẤT ĐÃ GIAO HÀNG CHO XE TẢI (STATUS = SHIPPING)
+        // =======================================================================
+        [HttpPut("{id}/shipping")]
+        public async Task<IActionResult> ShippingTransfer(int id)
+        {
+            var transfer = await _context.WmsTransfers.FindAsync(id);
+            if (transfer == null)
+                return BadRequest(new { message = "Phiếu điều chuyển không tồn tại!" });
+
+            if (transfer.Status == "shipping" || transfer.Status == "completed")
+                return BadRequest(new { message = "Lỗi: Lệnh này đã được xuất đi hoặc đã hoàn thành!" });
+
+            transfer.Status = "shipping";
+
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Đã xuất hàng! Hàng đang trên đường vận chuyển." });
+        }
+
+
+        // =======================================================================
+        // API (ĐÃ SỬA CHUẨN ERP): KHO NHẬN XÁC NHẬN -> HÀNG VÀO "KHU CHỜ NHẬP"
+        // =======================================================================
         [HttpPut("{id}/complete")]
         public async Task<IActionResult> CompleteTransfer(int id)
         {
@@ -113,8 +136,7 @@ namespace BE.Controllers
             {
                 foreach (var item in transfer.WmsTransferLines)
                 {
-
-                    // 1. TRỪ HÀNG Ở KỆ CŨ
+                    // 1. TRỪ HÀNG Ở KỆ CŨ (KHO XUẤT)
                     var sourceStock = await _context.WmsStockBalances.FirstOrDefaultAsync(s =>
                         s.VariantId == item.VariantId &&
                         s.LocationId == item.FromLocationId &&
@@ -122,29 +144,33 @@ namespace BE.Controllers
                         s.Hsd == item.Hsd);
 
                     if (sourceStock == null || sourceStock.Quantity < item.Qty)
-                        throw new Exception($"Kệ nguồn không đủ hàng cho Sản phẩm ID {item.VariantId}!");
+                        throw new Exception($"Kệ nguồn (ID {item.FromLocationId}) không đủ hàng cho Sản phẩm ID {item.VariantId}!");
 
                     sourceStock.Quantity -= item.Qty;
                     if (sourceStock.Quantity <= 0) _context.WmsStockBalances.Remove(sourceStock);
 
-                    // 2. CỘNG HÀNG VÀO KỆ MỚI
+
+                    // 2. CỘNG HÀNG VÀO "KHU CHỜ NHẬP" CỦA KHO MỚI (LocationId = null)
+                    // Hàng sẽ nằm lơ lửng trong Kho (hiện trên màn hình Kho bãi) để Thủ kho tự xếp lên kệ sau.
                     var destStock = await _context.WmsStockBalances.FirstOrDefaultAsync(s =>
                         s.VariantId == item.VariantId &&
-                        s.LocationId == item.ToLocationId &&
+                        s.WarehouseId == transfer.ToWh && // Tìm đúng Kho Nhập
+                        s.LocationId == null &&           // LocationId = null tức là Khu chờ nhập
                         s.Nsx == item.Nsx &&
                         s.Hsd == item.Hsd);
 
                     if (destStock != null)
                     {
-                        destStock.Quantity += item.Qty;
+                        destStock.Quantity += item.Qty; // Đã có sẵn hàng ở khu chờ nhập -> Cộng dồn
                     }
                     else
                     {
+                        // Chưa có hàng ở khu chờ nhập -> Tạo mới
                         _context.WmsStockBalances.Add(new WmsStockBalance
                         {
                             VariantId = item.VariantId,
-                            LocationId = item.ToLocationId,
-                            WarehouseId = transfer.ToWh ?? 1, // Lưu đúng mã Kho Đích
+                            LocationId = null,             // Gắn = null để chui vào Cất hàng (Putaway)
+                            WarehouseId = transfer.ToWh ?? 1,
                             Quantity = item.Qty,
                             Nsx = item.Nsx,
                             Hsd = item.Hsd
@@ -156,7 +182,7 @@ namespace BE.Controllers
                 await _context.SaveChangesAsync();
                 await transaction.CommitAsync();
 
-                return Ok(new { message = "Điều chuyển thành công! Hàng đã được luân chuyển trên DB." });
+                return Ok(new { message = "Điều chuyển thành công! Hàng đã nằm trong Khu Chờ Nhập." });
             }
             catch (Exception ex)
             {
@@ -171,11 +197,8 @@ namespace BE.Controllers
         public int? Id { get; set; }
         public string? Code { get; set; }
         public string? Date { get; set; }
-
-        // Bổ sung 2 cột này để map từ Giao diện xuống
         public int? FromWarehouseId { get; set; }
         public int? ToWarehouseId { get; set; }
-
         public string? Note { get; set; }
         public string? Status { get; set; }
         public List<TransferItemDto>? Items { get; set; } = new List<TransferItemDto>();

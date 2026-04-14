@@ -20,30 +20,33 @@ namespace BE.Controllers
         }
 
         // ==========================================================
-        // 1. LẤY DANH SÁCH PO
+        // 1. LẤY DANH SÁCH (HỖ TRỢ CẢ PR VÀ PO TRÊN 1 CONTROLLER)
         // ==========================================================
         [HttpGet]
-        public async Task<IActionResult> GetPOs()
+        public async Task<IActionResult> GetOrders()
         {
-            var pos = await _context.PurOrders
+            // Sếp lưu ý: _context.PurOrders là tên biến trong QLKhoContext trỏ đến bảng PUR_Orders
+            var orders = await _context.PurOrders
                 .Include(p => p.PurOrderLines)
                 .OrderByDescending(p => p.Poid)
                 .ToListAsync();
 
-            var result = pos.Select(p => new PoDto
+            var result = orders.Select(p => new PoDto
             {
                 Id = p.Poid,
                 Code = p.Pocode,
+                Type = p.Type ?? "PR",
                 SupplierId = p.SupplierId ?? 0,
-                Status = p.Status ?? "draft",
-                Date = "",
-                ExpectedDate = "",
-                Note = "",
-                TotalQty = p.PurOrderLines.Sum(l => (decimal)(l.OrderQty ?? 0)),
+                Status = p.Status ?? "pending",
+                Date = p.OrderDate?.ToString("yyyy-MM-dd") ?? "",
+                Note = p.Note ?? "",
+                // Tính tổng tiền cho PO (PR thì đơn giá = 0 nên tổng = 0)
+                TotalAmount = p.PurOrderLines.Sum(l => (l.OrderQty ?? 0) * (l.UnitPrice ?? 0)),
                 Items = p.PurOrderLines.Select(l => new PoItemDto
                 {
                     VariantId = l.VariantId ?? 0,
-                    Qty = (decimal)(l.OrderQty ?? 0)
+                    Qty = l.OrderQty ?? 0,
+                    Price = l.UnitPrice ?? 0
                 }).ToList()
             }).ToList();
 
@@ -51,10 +54,10 @@ namespace BE.Controllers
         }
 
         // ==========================================================
-        // 2. LẬP PO MỚI
+        // 2. TẠO MỚI PHIẾU (DÙNG CHO CẢ NÚT "XIN MUA" VÀ "LÊN PO")
         // ==========================================================
         [HttpPost]
-        public async Task<IActionResult> CreatePO([FromBody] PoDto req)
+        public async Task<IActionResult> CreateOrder([FromBody] PoDto req)
         {
             using var transaction = await _context.Database.BeginTransactionAsync();
             try
@@ -62,18 +65,22 @@ namespace BE.Controllers
                 string finalCode = req.Code;
                 if (string.IsNullOrEmpty(finalCode))
                 {
-                    int maxId = await _context.PurOrders.MaxAsync(r => (int?)r.Poid) ?? 0;
-                    finalCode = $"PO{(maxId + 1).ToString().PadLeft(4, '0')}";
+                    int count = await _context.PurOrders.CountAsync(o => o.Type == req.Type) + 1;
+                    string prefix = req.Type == "PO" ? "PO" : "PR";
+                    finalCode = $"{prefix}{count.ToString().PadLeft(4, '0')}";
                 }
 
-                var po = new PurOrder
+                var order = new PurOrder
                 {
                     Pocode = finalCode,
-                    SupplierId = req.SupplierId,
-                    Status = "pending"
+                    Type = req.Type ?? "PR",
+                    SupplierId = (req.Type == "PO" && req.SupplierId > 0) ? req.SupplierId : null,
+                    OrderDate = DateTime.Now,
+                    Note = req.Note,
+                    Status = req.Status ?? "pending"
                 };
 
-                _context.PurOrders.Add(po);
+                _context.PurOrders.Add(order);
                 await _context.SaveChangesAsync();
 
                 if (req.Items != null)
@@ -82,58 +89,17 @@ namespace BE.Controllers
                     {
                         _context.PurOrderLines.Add(new PurOrderLine
                         {
-                            Poid = po.Poid,
+                            Poid = order.Poid,
                             VariantId = item.VariantId,
-                            OrderQty = Convert.ToInt32(item.Qty),
-                            UnitPrice = 0 // GIÁ BẰNG 0 THEO YÊU CẦU CỦA SẾP
+                            OrderQty = (int)item.Qty,
+                            UnitPrice = item.Price // Giá nhập
                         });
                     }
                 }
+
                 await _context.SaveChangesAsync();
                 await transaction.CommitAsync();
-
-                return Ok(new { message = "Lập Đơn Đặt Hàng thành công!", code = po.Pocode });
-            }
-            catch (Exception ex)
-            {
-                await transaction.RollbackAsync();
-                return BadRequest(new { message = ex.InnerException?.Message ?? ex.Message });
-            }
-        }
-
-        // ==========================================================
-        // 3. SỬA PO (Chắc chắn 100%)
-        // ==========================================================
-        [HttpPut("{id}")]
-        public async Task<IActionResult> UpdatePO(int id, [FromBody] PoDto req)
-        {
-            using var transaction = await _context.Database.BeginTransactionAsync();
-            try
-            {
-                var po = await _context.PurOrders.Include(p => p.PurOrderLines).FirstOrDefaultAsync(p => p.Poid == id);
-                if (po == null || (po.Status != "pending" && po.Status != "draft"))
-                    return BadRequest(new { message = "Chỉ được sửa Đơn đang nháp hoặc chờ duyệt!" });
-
-                po.SupplierId = req.SupplierId;
-
-                // XÓA SẠCH CHI TIẾT CŨ BÊN TRONG, THAY BẰNG CHI TIẾT MỚI (CHUẨN CHỈ)
-                _context.PurOrderLines.RemoveRange(po.PurOrderLines);
-                if (req.Items != null)
-                {
-                    foreach (var item in req.Items)
-                    {
-                        _context.PurOrderLines.Add(new PurOrderLine
-                        {
-                            Poid = po.Poid,
-                            VariantId = item.VariantId,
-                            OrderQty = Convert.ToInt32(item.Qty),
-                            UnitPrice = 0 // GIÁ BẰNG 0
-                        });
-                    }
-                }
-                await _context.SaveChangesAsync();
-                await transaction.CommitAsync();
-                return Ok(new { message = "Cập nhật PO thành công!" });
+                return Ok(new { message = "Lưu thành công!", code = order.Pocode });
             }
             catch (Exception ex)
             {
@@ -143,83 +109,100 @@ namespace BE.Controllers
         }
 
         // ==========================================================
-        // 4. XÓA PO (Thêm mới theo yêu cầu sếp)
+        // 3. CẬP NHẬT (DÙNG KHI CHUYỂN PR SANG PO HOẶC SỬA PHIẾU)
         // ==========================================================
-        [HttpDelete("{id}")]
-        public async Task<IActionResult> DeletePO(int id)
+        [HttpPut("{id}")]
+        public async Task<IActionResult> UpdateOrder(int id, [FromBody] PoDto req)
         {
             using var transaction = await _context.Database.BeginTransactionAsync();
             try
             {
-                var po = await _context.PurOrders.Include(p => p.PurOrderLines).FirstOrDefaultAsync(p => p.Poid == id);
-                if (po == null) return NotFound(new { message = "Không tìm thấy phiếu!" });
+                var order = await _context.PurOrders.Include(p => p.PurOrderLines).FirstOrDefaultAsync(p => p.Poid == id);
+                if (order == null) return NotFound();
 
-                if (po.Status != "pending" && po.Status != "draft")
-                    return BadRequest(new { message = "Chỉ được xóa phiếu đang Nháp hoặc Chờ duyệt!" });
+                order.Type = req.Type ?? order.Type;
+                order.SupplierId = req.SupplierId > 0 ? req.SupplierId : order.SupplierId;
+                order.Note = req.Note ?? order.Note;
+                order.Status = req.Status ?? order.Status;
 
-                // Phải xóa các dòng con trước khi xóa phiếu cha
-                _context.PurOrderLines.RemoveRange(po.PurOrderLines);
-                _context.PurOrders.Remove(po);
+                // Nếu có ngày từ phía FE gửi lên thì cập nhật, không thì giữ nguyên
+                if (!string.IsNullOrEmpty(req.Date))
+                    order.OrderDate = DateTime.Parse(req.Date);
+
+                // Xóa chi tiết cũ, nạp lại chi tiết mới
+                _context.PurOrderLines.RemoveRange(order.PurOrderLines);
+                if (req.Items != null)
+                {
+                    foreach (var item in req.Items)
+                    {
+                        _context.PurOrderLines.Add(new PurOrderLine
+                        {
+                            Poid = order.Poid,
+                            VariantId = item.VariantId,
+                            OrderQty = (int)item.Qty,
+                            UnitPrice = item.Price
+                        });
+                    }
+                }
 
                 await _context.SaveChangesAsync();
                 await transaction.CommitAsync();
-
-                return Ok(new { message = "Đã xóa Đơn Đặt Hàng thành công!" });
+                return Ok(new { message = "Cập nhật thành công!" });
             }
             catch (Exception ex)
             {
                 await transaction.RollbackAsync();
-                return StatusCode(500, new { message = "Lỗi xóa dữ liệu: " + ex.Message });
+                return BadRequest(new { message = ex.Message });
             }
         }
 
         // ==========================================================
-        // 5. CÁC HÀM DUYỆT VÀ HOÀN THÀNH
+        // 4. DUYỆT NHANH TRẠNG THÁI
         // ==========================================================
-        [HttpPut("{id}/approve")]
-        public async Task<IActionResult> ApprovePO(int id)
+        [HttpPut("{id}/status")]
+        public async Task<IActionResult> UpdateStatus(int id, [FromBody] string newStatus)
         {
-            var po = await _context.PurOrders.FindAsync(id);
-            if (po != null) { po.Status = "approved"; await _context.SaveChangesAsync(); }
-            return Ok(new { message = "Đã duyệt!" });
+            var order = await _context.PurOrders.FindAsync(id);
+            if (order == null) return NotFound();
+
+            order.Status = newStatus;
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Đã cập nhật trạng thái!" });
         }
 
-        [HttpPut("{id}/send")]
-        public async Task<IActionResult> SendPO(int id)
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteOrder(int id)
         {
-            var po = await _context.PurOrders.FindAsync(id);
-            if (po != null) { po.Status = "sent"; await _context.SaveChangesAsync(); }
-            return Ok(new { message = "Đã gửi Email cho NCC!" });
-        }
+            var order = await _context.PurOrders.Include(p => p.PurOrderLines).FirstOrDefaultAsync(p => p.Poid == id);
+            if (order == null) return NotFound();
 
-        [HttpPut("{id}/complete")]
-        public async Task<IActionResult> CompletePO(int id)
-        {
-            var po = await _context.PurOrders.FindAsync(id);
-            if (po != null) { po.Status = "completed"; await _context.SaveChangesAsync(); }
-            return Ok(new { message = "Hoàn thành Đơn đặt hàng!" });
+            _context.PurOrderLines.RemoveRange(order.PurOrderLines);
+            _context.PurOrders.Remove(order);
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Đã xóa phiếu!" });
         }
     }
 
+    // ==========================================================
+    // DTO ĐỂ TRAO ĐỔI DỮ LIỆU VỚI FRONTEND
+    // ==========================================================
     public class PoDto
     {
         public int? Id { get; set; }
         public string? Code { get; set; }
+        public string? Type { get; set; } // "PR" hoặc "PO"
         public string? Date { get; set; }
-        public string? ExpectedDate { get; set; }
-        public int? SupplierId { get; set; }
-        public string? SupplierName { get; set; }
+        public int SupplierId { get; set; }
         public string? Note { get; set; }
         public string? Status { get; set; }
-        public decimal? TotalQty { get; set; }
-        public decimal? TotalPrice { get; set; }
-        public List<PoItemDto>? Items { get; set; } = new List<PoItemDto>();
+        public decimal TotalAmount { get; set; }
+        public List<PoItemDto>? Items { get; set; }
     }
 
     public class PoItemDto
     {
-        public int? VariantId { get; set; }
-        public decimal? Qty { get; set; }
-        public decimal? Price { get; set; }
+        public int VariantId { get; set; }
+        public decimal Qty { get; set; }
+        public decimal Price { get; set; }
     }
 }

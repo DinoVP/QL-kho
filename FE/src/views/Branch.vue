@@ -8,6 +8,12 @@ import {
 } from '@heroicons/vue/24/outline'
 
 const API_URL = 'https://localhost:7139/api/Branches'
+const STOCK_API = 'https://localhost:7139/api/Stock' // Gọi thêm API tồn kho để đếm
+
+const getAuthHeaders = () => ({ 
+    'Content-Type': 'application/json', 
+    'Authorization': 'Bearer ' + (localStorage.getItem('authToken') || '') 
+})
 
 const branches = ref([])
 const isLoading = ref(false)
@@ -31,7 +37,7 @@ const filteredBranches = computed(() => {
 })
 
 // ====================================================================
-// QUẢN LÝ KHO CỦA CHI NHÁNH
+// QUẢN LÝ KHO CỦA CHI NHÁNH (ĐÃ CỘNG TỒN KHO)
 // ====================================================================
 const isWhModalOpen = ref(false)
 const selectedBranchId = ref(null) 
@@ -40,13 +46,37 @@ const branchWarehouses = ref([])
 const isWhLoading = ref(false)
 
 const openWhModal = async (branch) => {
-  selectedBranchId.value = branch.id
-  selectedBranchName.value = branch.name
+  selectedBranchId.value = branch.id || branch.Id
+  selectedBranchName.value = branch.name || branch.Name
   isWhModalOpen.value = true
   isWhLoading.value = true
+  
   try {
-    const res = await fetch(`${API_URL}/${branch.id}/warehouses-detail`)
-    if (res.ok) branchWarehouses.value = await res.json()
+    const res = await fetch(`${API_URL}/${selectedBranchId.value}/warehouses-detail`, { headers: getAuthHeaders() })
+    if (res.ok) {
+        let whList = await res.json()
+        
+        // TẢI TỒN KHO ĐỂ TÍNH TOÁN CHO TỪNG KHO VẬT LÝ
+        try {
+            const stockRes = await fetch(STOCK_API, { headers: getAuthHeaders() })
+            const allStocks = stockRes.ok ? await stockRes.json() : []
+            
+            whList = whList.map(wh => {
+                const whId = wh.warehouseId || wh.WarehouseId || wh.id || wh.Id
+                // Lọc những hàng đang nằm trong Kho này
+                const whStocks = allStocks.filter(s => (s.warehouseId || s.WarehouseId) === whId)
+                
+                // Đếm số loại mặt hàng (SKU khác nhau)
+                const uniqueItems = new Set(whStocks.map(s => s.variantId || s.VariantId)).size
+                // Tổng số lượng tất cả hàng
+                const totalQty = whStocks.reduce((sum, s) => sum + Number(s.qty || s.Qty || s.quantity || s.Quantity || 0), 0)
+                
+                return { ...wh, itemCount: uniqueItems, totalQuantity: totalQty }
+            })
+        } catch (e) { console.error("Không đếm được kho", e) }
+
+        branchWarehouses.value = whList
+    }
   } catch (err) { 
     showToast('Lỗi tải danh sách kho', 'error') 
   } finally { 
@@ -57,7 +87,7 @@ const openWhModal = async (branch) => {
 const deleteWarehouse = async (whId, whName) => {
   if (!confirm(`Sếp có chắc chắn xóa kho "${whName}"? Nhân sự trong kho sẽ tự động được gỡ (vẫn giữ chi nhánh).`)) return;
   try {
-    const res = await fetch(`${API_URL}/warehouses/${whId}`, { method: 'DELETE' });
+    const res = await fetch(`${API_URL}/warehouses/${whId}`, { method: 'DELETE', headers: getAuthHeaders() });
     let data; 
     try { data = await res.json(); } catch(e) { data = { message: 'Lỗi phản hồi' } }
     if (res.ok) {
@@ -73,7 +103,7 @@ const deleteWarehouse = async (whId, whName) => {
 const clearWarehouseEmployees = async (whId, whName) => {
   if (!confirm(`CẢNH BÁO: Gỡ TẤT CẢ nhân viên khỏi kho "${whName}"?`)) return;
   try {
-    const res = await fetch(`${API_URL}/warehouses/${whId}/clear-employees`, { method: 'PUT' });
+    const res = await fetch(`${API_URL}/warehouses/${whId}/clear-employees`, { method: 'PUT', headers: getAuthHeaders() });
     let data; 
     try { data = await res.json(); } catch(e) { data = { message: 'Lỗi phản hồi' } }
     if (res.ok) {
@@ -94,11 +124,11 @@ const whEmployees = ref([])
 const isWhEmpLoading = ref(false)
 
 const openWhEmpModal = async (wh) => {
-  currentWhName.value = wh.whname
+  currentWhName.value = wh.whname || wh.Whname
   isWhEmpModalOpen.value = true
   isWhEmpLoading.value = true
   try {
-    const res = await fetch(`${API_URL}/warehouses/${wh.warehouseId}/employees`)
+    const res = await fetch(`${API_URL}/warehouses/${wh.warehouseId || wh.WarehouseId}/employees`, { headers: getAuthHeaders() })
     if (res.ok) whEmployees.value = await res.json()
   } catch(e) { 
     showToast('Lỗi tải danh sách NV', 'error') 
@@ -108,7 +138,7 @@ const openWhEmpModal = async (wh) => {
 }
 
 // ====================================================================
-// TẠO NHANH KHO (CÓ ĐỊA CHỈ, KHÔNG MÃ KHO)
+// TẠO NHANH KHO
 // ====================================================================
 const isCreateWhModalOpen = ref(false)
 const whFormData = ref({ name: '', address: '' })
@@ -126,7 +156,7 @@ const submitCreateWh = async () => {
   try {
     const res = await fetch(`${API_URL}/${selectedBranchId.value}/warehouses`, {
       method: 'POST', 
-      headers: { 'Content-Type': 'application/json' }, 
+      headers: getAuthHeaders(), 
       body: JSON.stringify(whFormData.value)
     })
     let data; 
@@ -144,7 +174,7 @@ const submitCreateWh = async () => {
 }
 
 // ====================================================================
-// QUẢN LÝ CHI NHÁNH CHÍNH
+// QUẢN LÝ CHI NHÁNH CHÍNH (ĐÃ CỘNG TỒN KHO)
 // ====================================================================
 const showModal = ref(false)
 const modalMode = ref('add') 
@@ -177,7 +207,7 @@ const openManagerModal = async () => {
   if (modalMode.value === 'view') return
   isManagerModalOpen.value = true; managerSearchQuery.value = ''
   try {
-    const res = await fetch(`${API_URL}/available-managers`)
+    const res = await fetch(`${API_URL}/available-managers`, { headers: getAuthHeaders() })
     if (res.ok) availableManagers.value = await res.json()
   } catch (err) { showToast('Lỗi tải danh sách giám đốc', 'error') }
 }
@@ -200,8 +230,41 @@ const clearManager = () => {
 const fetchBranches = async () => {
   isLoading.value = true
   try {
-    const res = await fetch(API_URL)
-    if (res.ok) branches.value = await res.json()
+    const res = await fetch(API_URL, { headers: getAuthHeaders() })
+    if (!res.ok) throw new Error("Lỗi fetch")
+    let branchesData = await res.json()
+
+    // 1. Fetch Tồn Kho
+    let allStocks = []
+    try {
+        const stockRes = await fetch(STOCK_API, { headers: getAuthHeaders() })
+        if (stockRes.ok) allStocks = await stockRes.json()
+    } catch (e) { console.warn("Chưa tải được tồn kho", e) }
+
+    // 2. Chạy vòng lặp nhặt Kho để đếm số liệu cho Chi nhánh
+    const branchPromises = branchesData.map(async (b) => {
+        const bId = b.id || b.Id
+        try {
+            const whRes = await fetch(`${API_URL}/${bId}/warehouses-detail`, { headers: getAuthHeaders() })
+            const whList = whRes.ok ? await whRes.json() : []
+            
+            // Ép chuẩn số lượng Kho nếu Backend quên đếm
+            b.warehouseCount = whList.length
+            
+            // Tìm tất cả Tồn Kho thuộc các Kho của Chi Nhánh này
+            const whIds = whList.map(w => w.warehouseId || w.WarehouseId || w.id || w.Id)
+            const bStocks = allStocks.filter(s => whIds.includes(s.warehouseId || s.WarehouseId))
+            
+            // Tính số loại SP và Tổng Số Lượng
+            b.itemCount = new Set(bStocks.map(s => s.variantId || s.VariantId)).size
+            b.totalQuantity = bStocks.reduce((sum, s) => sum + Number(s.qty || s.Qty || s.quantity || s.Quantity || 0), 0)
+        } catch(e) {
+            b.itemCount = 0; b.totalQuantity = 0; b.warehouseCount = 0;
+        }
+        return b
+    })
+
+    branches.value = await Promise.all(branchPromises)
   } catch (err) { showToast('Lỗi kết nối Backend', 'error') } 
   finally { isLoading.value = false }
 }
@@ -211,12 +274,12 @@ const handleSubmit = async () => {
   const method = modalMode.value === 'add' ? 'POST' : 'PUT'
   const url = modalMode.value === 'add' ? API_URL : `${API_URL}/${formData.value.id}`
   try {
-    const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(formData.value) })
+    const res = await fetch(url, { method, headers: getAuthHeaders(), body: JSON.stringify(formData.value) })
     let data; 
     try { data = await res.json(); } catch(e) { data = { message: 'Lỗi hệ thống' } }
     
     if (res.ok) { 
-      showToast(data.message, 'success'); 
+      showToast(data.message || 'Lưu thành công!', 'success'); 
       closeModal(); 
       fetchBranches(); 
     } 
@@ -227,7 +290,7 @@ const handleSubmit = async () => {
 const handleDelete = async (branchId, branchName) => {
   if (confirm(`Sếp có chắc chắn muốn xóa Chi nhánh "${branchName}" không?`)) {
     try {
-      const res = await fetch(`${API_URL}/${branchId}`, { method: 'DELETE' })
+      const res = await fetch(`${API_URL}/${branchId}`, { method: 'DELETE', headers: getAuthHeaders() })
       let data = {};
       try { data = await res.json(); } catch(e) { data = { message: 'Không thể xóa! Có lỗi hệ thống từ máy chủ.' }; }
 
@@ -336,18 +399,18 @@ onMounted(() => fetchBranches())
                 <div class="flex justify-center gap-4 text-xs">
                   <div class="flex flex-col items-center" title="Số loại mặt hàng">
                     <CubeIcon class="w-4 h-4 text-blue-500 mb-0.5"/>
-                    <span class="font-bold text-gray-700">{{ branch.itemCount }}</span>
+                    <span class="font-bold text-gray-700">{{ branch.itemCount || 0 }}</span>
                   </div>
                   <div class="flex flex-col items-center" title="Tổng số lượng tồn">
                     <ChartBarSquareIcon class="w-4 h-4 text-emerald-500 mb-0.5"/>
-                    <span class="font-bold text-gray-700">{{ branch.totalQuantity }}</span>
+                    <span class="font-bold text-gray-700">{{ branch.totalQuantity || 0 }}</span>
                   </div>
                 </div>
               </td>
               
               <td class="px-5 py-3 text-center font-bold text-gray-700">
                 <span class="bg-indigo-50 text-indigo-700 border border-indigo-200 px-3 py-1 rounded-full text-xs">
-                  {{ branch.warehouseCount }}
+                  {{ branch.warehouseCount || 0 }}
                 </span>
               </td>
               
@@ -366,7 +429,7 @@ onMounted(() => fetchBranches())
                 <button @click="openModal('edit', branch)" class="p-1.5 text-amber-600 hover:bg-amber-50 rounded" title="Chỉnh sửa">
                   <PencilSquareIcon class="w-5 h-5" />
                 </button>
-                <button @click="handleDelete(branch.id, branch.name)" class="p-1.5 text-red-600 hover:bg-red-50 rounded" title="Xóa">
+                <button @click="handleDelete(branch.id || branch.Id, branch.name || branch.Name)" class="p-1.5 text-red-600 hover:bg-red-50 rounded" title="Xóa">
                   <TrashIcon class="w-5 h-5" />
                 </button>
               </td>
@@ -536,12 +599,12 @@ onMounted(() => fetchBranches())
                   <tr v-for="wh in branchWarehouses" :key="wh.warehouseId" 
                       :class="['transition-colors', (wh.hasManager && wh.employeeCount >= 10) ? 'bg-gray-100 opacity-60 grayscale' : 'hover:bg-purple-50']">
                     
-                    <td class="p-3 font-bold text-gray-800">{{ wh.whname }}</td>
+                    <td class="p-3 font-bold text-gray-800">{{ wh.whname || wh.Whname }}</td>
                     
                     <td class="p-3">
                       <div class="text-xs text-gray-500 flex items-start gap-1">
                         <MapPinIcon class="w-3.5 h-3.5 mt-0.5 text-gray-400 shrink-0"/> 
-                        <span class="line-clamp-2" :title="wh.whAddress">{{ wh.whAddress }}</span>
+                        <span class="line-clamp-2" :title="wh.whAddress || wh.WhAddress">{{ wh.whAddress || wh.WhAddress || 'Chưa cập nhật' }}</span>
                       </div>
                     </td>
                     
@@ -549,21 +612,21 @@ onMounted(() => fetchBranches())
                       <div class="flex justify-center gap-3 text-xs">
                         <div class="flex flex-col items-center" title="Số loại mặt hàng">
                           <CubeIcon class="w-4 h-4 text-blue-500 mb-0.5"/>
-                          <span class="font-bold text-gray-700">{{ wh.itemCount }}</span>
+                          <span class="font-bold text-gray-700">{{ wh.itemCount || 0 }}</span>
                         </div>
                         <div class="flex flex-col items-center" title="Tổng số lượng tồn">
                           <ChartBarSquareIcon class="w-4 h-4 text-emerald-500 mb-0.5"/>
-                          <span class="font-bold text-gray-700">{{ wh.totalQuantity }}</span>
+                          <span class="font-bold text-gray-700">{{ wh.totalQuantity || 0 }}</span>
                         </div>
                       </div>
                     </td>
 
                     <td class="p-3 text-center">
                       <div class="flex items-center justify-center gap-1 font-bold text-primary-700">
-                        {{ wh.employeeCount }} / 10
+                        {{ wh.employeeCount || 0 }} / 10
                       </div>
                       <div class="text-[10px] text-gray-400 uppercase font-medium mt-0.5">
-                        QL: <span :class="wh.hasManager ? 'text-gray-600' : 'text-red-500 italic'">{{ wh.managerName }}</span>
+                        QL: <span :class="wh.hasManager ? 'text-gray-600' : 'text-red-500 italic'">{{ wh.managerName || 'Chưa có' }}</span>
                       </div>
                     </td>
                     
@@ -571,10 +634,10 @@ onMounted(() => fetchBranches())
                       <button @click="openWhEmpModal(wh)" class="p-1.5 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors border border-transparent hover:border-blue-200" title="Xem danh sách nhân viên">
                         <EyeIcon class="w-4 h-4 inline" />
                       </button>
-                      <button @click="clearWarehouseEmployees(wh.warehouseId, wh.whname)" class="p-1.5 text-orange-600 hover:bg-orange-100 rounded-lg transition-colors border border-transparent hover:border-orange-200" title="Gỡ TẤT CẢ nhân viên khỏi kho này">
+                      <button @click="clearWarehouseEmployees(wh.warehouseId || wh.WarehouseId, wh.whname || wh.Whname)" class="p-1.5 text-orange-600 hover:bg-orange-100 rounded-lg transition-colors border border-transparent hover:border-orange-200" title="Gỡ TẤT CẢ nhân viên khỏi kho này">
                         <UserMinusIcon class="w-4 h-4 inline" />
                       </button>
-                      <button @click="deleteWarehouse(wh.warehouseId, wh.whname)" class="p-1.5 text-red-600 hover:bg-red-100 rounded-lg transition-colors border border-transparent hover:border-red-200" title="Xóa Kho này">
+                      <button @click="deleteWarehouse(wh.warehouseId || wh.WarehouseId, wh.whname || wh.Whname)" class="p-1.5 text-red-600 hover:bg-red-100 rounded-lg transition-colors border border-transparent hover:border-red-200" title="Xóa Kho này">
                         <TrashIcon class="w-4 h-4 inline" />
                       </button>
                     </td>

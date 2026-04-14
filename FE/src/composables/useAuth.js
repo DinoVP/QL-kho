@@ -38,7 +38,6 @@ export function useAuth() {
       // =========================================================================
       if (!warehouseId || !branchId) {
         try {
-          // Gọi API Employees để lấy hồ sơ của chính user này
           const empRes = await api.get("/Employees");
           const myProfile = empRes.data.find(
             (e) => e.username === username || e.Username === username,
@@ -89,27 +88,26 @@ export function useAuth() {
 
   const isLoggedIn = computed(() => !!authToken.value);
 
-  // ĐÃ THÊM QUYỀN CHO THU MUA
   const canExport = computed(() =>
     ["admin", "giam_doc", "gd_chi_nhanh", "ql_kho", "nv_thu_mua"].includes(
-      currentUserRole.value,
+      currentUserRole.value?.toLowerCase()
     ),
   );
 
   // Thu mua chỉ tạo PO, không duyệt. Giám đốc duyệt.
   const canApprovePO = computed(() =>
-    ["admin", "giam_doc"].includes(currentUserRole.value),
+    ["admin", "giam_doc"].includes(currentUserRole.value?.toLowerCase()),
   );
 
   const canApproveOperation = computed(() =>
     ["admin", "giam_doc", "gd_chi_nhanh", "ql_kho"].includes(
-      currentUserRole.value,
+      currentUserRole.value?.toLowerCase()
     ),
   );
 
   const canModifyStock = computed(() =>
     ["admin", "giam_doc", "gd_chi_nhanh", "ql_kho"].includes(
-      currentUserRole.value,
+      currentUserRole.value?.toLowerCase()
     ),
   );
 
