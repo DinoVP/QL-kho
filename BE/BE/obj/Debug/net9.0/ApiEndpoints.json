@@ -988,6 +988,22 @@
     "ReturnTypes": []
   },
   {
+    "ContainingType": "BE.Controllers.ProductsController",
+    "Method": "GetPriceHistory",
+    "RelativePath": "api/Products/{id}/price-history",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "id",
+        "Type": "System.Int32",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
     "ContainingType": "BE.Controllers.StockController",
     "Method": "GetStock",
     "RelativePath": "api/Stock",

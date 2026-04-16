@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using Tên_Project_Của_Sếp.Models;
 
 namespace BE.Models;
 
@@ -11,7 +12,6 @@ public partial class ItmProduct
 
     public int? BrandId { get; set; }
 
-    public int? UoMgroupId { get; set; }
 
     public int? TaxId { get; set; }
 
@@ -31,5 +31,5 @@ public partial class ItmProduct
 
     public virtual FinTaxRate? Tax { get; set; }
 
-    public virtual ItmUoMgroup? UoMgroup { get; set; }
+    public virtual ICollection<ItmProductUnit> ItmProductUnits { get; set; } = new List<ItmProductUnit>();
 }

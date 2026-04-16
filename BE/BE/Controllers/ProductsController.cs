@@ -5,6 +5,7 @@ using System;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Collections.Generic;
+using Tên_Project_Của_Sếp.Models;
 
 namespace BE.Controllers
 {
@@ -15,30 +16,43 @@ namespace BE.Controllers
         private readonly QLKhoContext _context;
         public ProductsController(QLKhoContext context) { _context = context; }
 
+        private async Task<int> GetOrCreateUnitAsync(string unitName)
+        {
+            if (string.IsNullOrWhiteSpace(unitName)) unitName = "SL";
+            var unit = await _context.ItmUnits.FirstOrDefaultAsync(u => u.UnitName == unitName);
+            if (unit == null)
+            {
+                unit = new ItmUnit
+                {
+                    UnitCode = "UNI_" + DateTime.Now.Ticks.ToString().Substring(8, 6),
+                    UnitName = unitName
+                };
+                _context.ItmUnits.Add(unit);
+                await _context.SaveChangesAsync();
+            }
+            return unit.UnitId;
+        }
+
         [HttpGet]
         public async Task<IActionResult> GetAllSkus()
         {
             var variants = await _context.ItmVariants
                 .Include(v => v.Product).ThenInclude(p => p.Brand)
-                .Include(v => v.Product).ThenInclude(p => p.UoMgroup)
                 .Include(v => v.Product).ThenInclude(p => p.SubCat).ThenInclude(sc => sc.Category)
+                .Include(v => v.Product).ThenInclude(p => p.ItmProductUnits).ThenInclude(pu => pu.FromUnit)
+                .Include(v => v.Product).ThenInclude(p => p.ItmProductUnits).ThenInclude(pu => pu.ToUnit)
                 .ToListAsync();
 
-            var uomGroupIds = variants.Where(v => v.Product?.UoMgroupId != null).Select(v => v.Product.UoMgroupId).Distinct().ToList();
-            var allConversions = await _context.ItmUoMconversions.Where(c => uomGroupIds.Contains(c.UoMgroupId)).ToListAsync();
-
             var result = variants.Select(v => {
-                var productConvs = allConversions.Where(c => c.UoMgroupId == v.Product?.UoMgroupId)
-                                                 .Select(c => new ConversionDto { AltUnit = c.AltUoM, Rate = c.ConvRate ?? 1 })
-                                                 .ToList();
+                var productUnits = v.Product?.ItmProductUnits ?? new List<ItmProductUnit>();
 
-                // XỬ LÝ ẨN MÃ UOM_SP ĐỂ HIỆN ĐÚNG TÊN ĐVT CƠ BẢN (VD: Lon, Cái)
-                string unitName = v.Product?.UoMgroup?.GroupName ?? "SL";
-                if (unitName.StartsWith("UOM_"))
+                var productConvs = productUnits.Select(pu => new ConversionDto
                 {
-                    var parts = unitName.Split('_');
-                    unitName = parts.Length > 2 ? parts[2] : "SL";
-                }
+                    AltUnit = pu.FromUnit?.UnitName ?? "N/A",
+                    Rate = pu.ToQty
+                }).ToList();
+
+                string unitName = v.Product?.PackSize ?? "SL";
 
                 string displayPackSize = productConvs.Any()
                     ? string.Join(" | ", productConvs.Select(c => $"1 {c.AltUnit} = {c.Rate:0.##} {unitName}"))
@@ -51,12 +65,13 @@ namespace BE.Controllers
                     Name = v.Product?.ProductName ?? "Sản phẩm ẩn",
                     Category = v.Product?.SubCat?.Category?.CatName ?? "Chưa phân loại",
                     Brand = v.Product?.Brand?.BrandName ?? "N/A",
-                    Unit = unitName, // Đã fix hiện đúng ĐVT
+                    Unit = unitName,
                     PackSize = displayPackSize,
                     ConversionRate = displayPackSize,
                     Conversions = productConvs,
                     Weight = v.Product?.Weight ?? 0,
-                    Status = "active"
+                    Status = "active",
+                    ImportPrice = v.BasePrice ?? 0 // ĐÃ FIX: Lấy giá từ DB lên
                 };
             }).ToList();
 
@@ -71,7 +86,6 @@ namespace BE.Controllers
             {
                 var brand = await _context.ItmBrands.FirstOrDefaultAsync(b => b.BrandName == req.Brand);
                 var cat = await _context.ItmCategories.FirstOrDefaultAsync(c => c.CatName == req.Category);
-                var uom = await _context.ItmUoMgroups.FirstOrDefaultAsync(u => u.GroupName == req.Unit);
 
                 var subCat = await _context.ItmSubCategories.FirstOrDefaultAsync(s => s.CategoryId == (cat != null ? cat.CategoryId : 1));
                 if (subCat == null)
@@ -82,46 +96,45 @@ namespace BE.Controllers
                 }
 
                 string autoCode = "SP" + DateTime.Now.ToString("ddHHmmss");
-                int? finalUomGroupId = uom?.UoMgroupId;
-
-                if (req.Conversions != null && req.Conversions.Any())
-                {
-                    // Lưu giấu tên ĐVT Cơ bản vào cuối chuỗi để lúc GET gọi ra
-                    var customUom = new ItmUoMgroup { GroupName = "UOM_" + autoCode + "_" + req.Unit };
-                    _context.ItmUoMgroups.Add(customUom);
-                    await _context.SaveChangesAsync();
-                    finalUomGroupId = customUom.UoMgroupId;
-
-                    foreach (var c in req.Conversions)
-                    {
-                        _context.ItmUoMconversions.Add(new ItmUoMconversion
-                        {
-                            UoMgroupId = finalUomGroupId,
-                            AltUoM = c.AltUnit,
-                            ConvRate = c.Rate
-                        });
-                    }
-                    await _context.SaveChangesAsync();
-                }
 
                 var product = new ItmProduct
                 {
                     Sku = autoCode,
                     ProductName = req.Name,
                     BrandId = brand?.BrandId,
-                    UoMgroupId = finalUomGroupId,
                     SubCatId = subCat?.SubCatId ?? 1,
-                    PackSize = req.PackSize,
+                    PackSize = req.Unit,
                     Weight = req.Weight
                 };
 
                 _context.ItmProducts.Add(product);
                 await _context.SaveChangesAsync();
 
+                if (req.Conversions != null && req.Conversions.Any())
+                {
+                    int baseUnitId = await GetOrCreateUnitAsync(req.Unit);
+
+                    foreach (var c in req.Conversions)
+                    {
+                        int altUnitId = await GetOrCreateUnitAsync(c.AltUnit);
+
+                        _context.ItmProductUnits.Add(new ItmProductUnit
+                        {
+                            ProductId = product.ProductId,
+                            FromUnitId = altUnitId,
+                            FromQty = 1,
+                            ToUnitId = baseUnitId,
+                            ToQty = c.Rate
+                        });
+                    }
+                    await _context.SaveChangesAsync();
+                }
+
                 var variant = new ItmVariant
                 {
                     ProductId = product.ProductId,
-                    VariantSku = autoCode
+                    VariantSku = autoCode,
+                    BasePrice = req.ImportPrice
                 };
                 _context.ItmVariants.Add(variant);
                 await _context.SaveChangesAsync();
@@ -145,16 +158,36 @@ namespace BE.Controllers
                 var variant = await _context.ItmVariants.Include(v => v.Product).FirstOrDefaultAsync(v => v.VariantId == id);
                 if (variant == null) return NotFound(new { message = "Không tìm thấy Sản phẩm!" });
 
+                // ==========================================================
+                // 🚀 BẮT MẠCH BIẾN ĐỘNG GIÁ TỰ ĐỘNG
+                // ==========================================================
+                if (variant.BasePrice != req.ImportPrice)
+                {
+                    var history = new ItmPriceHistory
+                    {
+                        VariantId = variant.VariantId,
+                        OldPrice = variant.BasePrice ?? 0,
+                        NewPrice = req.ImportPrice,
+                        EffectiveDate = DateTime.Now,
+                        UpdatedBy = "Admin", // Hiện tại để mặc định, sau này nối thông tin User vào
+                        Source = "Cập nhật thủ công (Danh mục)"
+                    };
+                    _context.ItmPriceHistories.Add(history);
+                }
+
+                // Ghi đè giá mới vào sản phẩm
+                variant.BasePrice = req.ImportPrice;
+
                 if (variant.Product != null)
                 {
                     variant.Product.ProductName = req.Name;
 
                     var brand = await _context.ItmBrands.FirstOrDefaultAsync(b => b.BrandName == req.Brand);
                     var cat = await _context.ItmCategories.FirstOrDefaultAsync(c => c.CatName == req.Category);
-                    var uom = await _context.ItmUoMgroups.FirstOrDefaultAsync(u => u.GroupName == req.Unit);
 
                     variant.Product.BrandId = brand?.BrandId;
-                    int? finalUomGroupId = uom?.UoMgroupId;
+                    variant.Product.PackSize = req.Unit;
+                    variant.Product.Weight = req.Weight;
 
                     if (cat != null)
                     {
@@ -162,41 +195,32 @@ namespace BE.Controllers
                         if (subCat != null) variant.Product.SubCatId = subCat.SubCatId;
                     }
 
+                    var oldConvs = await _context.ItmProductUnits.Where(p => p.ProductId == variant.Product.ProductId).ToListAsync();
+                    if (oldConvs.Any())
+                    {
+                        _context.ItmProductUnits.RemoveRange(oldConvs);
+                        await _context.SaveChangesAsync();
+                    }
+
                     if (req.Conversions != null && req.Conversions.Any())
                     {
-                        var currentUom = await _context.ItmUoMgroups.FindAsync(variant.Product.UoMgroupId);
-                        if (currentUom == null || !currentUom.GroupName.StartsWith("UOM_"))
-                        {
-                            var customUom = new ItmUoMgroup { GroupName = "UOM_" + variant.Product.Sku + "_" + req.Unit };
-                            _context.ItmUoMgroups.Add(customUom);
-                            await _context.SaveChangesAsync();
-                            finalUomGroupId = customUom.UoMgroupId;
-                        }
-                        else
-                        {
-                            // Cập nhật lại Tên ĐVT cơ bản lỡ user có đổi
-                            currentUom.GroupName = "UOM_" + variant.Product.Sku + "_" + req.Unit;
-                            finalUomGroupId = currentUom.UoMgroupId;
-                            var oldConvs = await _context.ItmUoMconversions.Where(c => c.UoMgroupId == finalUomGroupId).ToListAsync();
-                            _context.ItmUoMconversions.RemoveRange(oldConvs);
-                            await _context.SaveChangesAsync();
-                        }
+                        int baseUnitId = await GetOrCreateUnitAsync(req.Unit);
 
                         foreach (var c in req.Conversions)
                         {
-                            _context.ItmUoMconversions.Add(new ItmUoMconversion
+                            int altUnitId = await GetOrCreateUnitAsync(c.AltUnit);
+
+                            _context.ItmProductUnits.Add(new ItmProductUnit
                             {
-                                UoMgroupId = finalUomGroupId,
-                                AltUoM = c.AltUnit,
-                                ConvRate = c.Rate
+                                ProductId = variant.Product.ProductId,
+                                FromUnitId = altUnitId,
+                                FromQty = 1,
+                                ToUnitId = baseUnitId,
+                                ToQty = c.Rate
                             });
                         }
                         await _context.SaveChangesAsync();
                     }
-
-                    variant.Product.UoMgroupId = finalUomGroupId;
-                    variant.Product.PackSize = req.PackSize;
-                    variant.Product.Weight = req.Weight;
                 }
 
                 await _context.SaveChangesAsync();
@@ -215,11 +239,17 @@ namespace BE.Controllers
         {
             try
             {
-                var variant = await _context.ItmVariants.FindAsync(id);
+                var variant = await _context.ItmVariants.Include(v => v.Product).FirstOrDefaultAsync(v => v.VariantId == id);
                 if (variant == null) return NotFound(new { message = "Không tìm thấy Sản phẩm!" });
 
                 bool hasStock = await _context.WmsStockBalances.AnyAsync(s => s.VariantId == id);
                 if (hasStock) return BadRequest(new { message = "Sản phẩm này đã được xếp lên kệ, không thể xóa!" });
+
+                if (variant.Product != null)
+                {
+                    var productUnits = await _context.ItmProductUnits.Where(pu => pu.ProductId == variant.Product.ProductId).ToListAsync();
+                    if (productUnits.Any()) _context.ItmProductUnits.RemoveRange(productUnits);
+                }
 
                 _context.ItmVariants.Remove(variant);
                 await _context.SaveChangesAsync();
@@ -227,6 +257,28 @@ namespace BE.Controllers
                 return Ok(new { message = "Đã xóa thành công!" });
             }
             catch (Exception) { return BadRequest(new { message = "Sản phẩm này đã phát sinh giao dịch, không thể xóa!" }); }
+        }
+
+        // ==========================================================
+        // 🚀 API TRẢ VỀ LỊCH SỬ GIÁ CHO VUE.JS
+        // ==========================================================
+        [HttpGet("{id}/price-history")]
+        public async Task<IActionResult> GetPriceHistory(int id)
+        {
+            var history = await _context.ItmPriceHistories
+                .Where(h => h.VariantId == id)
+                .OrderByDescending(h => h.EffectiveDate)
+                .Select(h => new {
+                    historyId = h.HistoryId,
+                    oldPrice = h.OldPrice,
+                    newPrice = h.NewPrice,
+                    effectiveDate = h.EffectiveDate,
+                    updatedBy = h.UpdatedBy,
+                    source = h.Source
+                })
+                .ToListAsync();
+
+            return Ok(history);
         }
     }
 
@@ -243,6 +295,7 @@ namespace BE.Controllers
         public List<ConversionDto> Conversions { get; set; } = new List<ConversionDto>();
         public decimal Weight { get; set; }
         public string? Status { get; set; }
+        public decimal ImportPrice { get; set; }
     }
 
     public class ConversionDto

@@ -12,20 +12,23 @@ const currentRole = currentUserRole.value?.toLowerCase() || 'ql_kho'
 
 const ORDER_API = 'https://localhost:7139/api/Po'
 const PROD_API = 'https://localhost:7139/api/Products'
+const PARTNER_API = 'https://localhost:7139/api/CrmPartners' // ĐÃ BỔ SUNG ĐỂ KÉO NHÀ CUNG CẤP
 
 const getAuthHeaders = () => ({ 
     'Content-Type': 'application/json', 
     'Authorization': 'Bearer ' + (localStorage.getItem('authToken') || '') 
 })
 
-const canCreatePR = computed(() => ['admin', 'ql_kho'].includes(currentRole))
-const canApprovePR = computed(() => ['admin', 'giam_doc', 'gd_chi_nhanh'].includes(currentRole))
+const canCreatePR = computed(() => ['admin', 'ql_kho', 'giam_doc', 'gd_chi_nhanh', 'gdcn'].includes(currentRole))
+const canApprovePR = computed(() => ['admin', 'giam_doc', 'gd_chi_nhanh', 'gdcn'].includes(currentRole))
 
 const prList = ref([])
 const productsList = ref([])
+const suppliersList = ref([]) // BỔ SUNG
 const isLoading = ref(false)
 
 const getToday = () => new Date().toISOString().split('T')[0]
+const formatCurrency = (val) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(val || 0)
 
 // BỘ QUY ĐỔI ĐƠN VỊ
 const getUnitChain = (prod) => {
@@ -70,29 +73,38 @@ const getItemQuantities = (items) => {
     return items.length > 2 ? `${qtys.join(', ')} ...` : qtys.join(', ');
 }
 
-// GỌI DỮ LIỆU
+// GỌI DỮ LIỆU ĐÃ FIX LẤY NCC
 const fetchData = async () => {
     isLoading.value = true
     try {
         const headers = getAuthHeaders()
-        const [orderRes, prodRes] = await Promise.all([
+        const [orderRes, prodRes, partnerRes] = await Promise.all([
             fetch(ORDER_API, { headers }), 
-            fetch(PROD_API, { headers })
+            fetch(PROD_API, { headers }),
+            fetch(PARTNER_API, { headers })
         ])
         
-        if (prodRes.ok) {
-            productsList.value = await prodRes.json()
-        }
+        if (prodRes.ok) productsList.value = await prodRes.json()
         
+        if (partnerRes.ok) {
+            const pData = await partnerRes.json();
+            suppliersList.value = (pData.data || pData.Data || pData || []).filter(p => p.isSupplier || p.partnerCode?.startsWith('NC'))
+        }
+
         if (orderRes.ok) {
             const rawOrders = await orderRes.json()
             
             prList.value = rawOrders.map(o => {
                 let type = o.type || o.Type;
                 let code = o.code || o.Code || `${type}${o.id.toString().padStart(4, '0')}`;
-                
                 let displayStatus = o.status || o.Status;
                 if (type === 'PO') displayStatus = 'completed'; 
+
+                // Ghép tên NCC đề xuất nếu có
+                if (o.partnerId || o.PartnerId) {
+                    const sup = suppliersList.value.find(s => s.partnerId === (o.partnerId||o.PartnerId) || s.id === (o.partnerId||o.PartnerId));
+                    o.supplierName = sup ? (sup.partnerName || sup.name) : 'NCC Ẩn';
+                }
 
                 if (o.items) {
                     o.items = o.items.map(i => {
@@ -127,7 +139,7 @@ const filteredPRs = computed(() => {
 
 const showModal = ref(false)
 const modalMode = ref('add') 
-const formData = ref({ id: 0, code: '', type: 'PR', date: getToday(), items: [], note: '', status: 'pending', displayStatus: 'pending' })
+const formData = ref({ id: 0, code: '', type: 'PR', date: getToday(), partnerId: '', items: [], note: '', status: 'pending', displayStatus: 'pending' })
 
 const openModal = (mode, order = null) => {
     modalMode.value = mode
@@ -155,12 +167,13 @@ const openModal = (mode, order = null) => {
                 units: units, 
                 selectedUnit: bestUnit.name, 
                 inputQty: bestInputQty, 
-                qty: totalQty
+                qty: totalQty,
+                price: i.price || i.Price || prod.importPrice || prod.ImportPrice || prod.price || 0 // FIX: Hứng giá
             }
         })
-        formData.value = { ...order, type: 'PR', items: mappedItems }
+        formData.value = { ...order, type: 'PR', items: mappedItems, partnerId: order.partnerId || order.PartnerId || '' }
     } else { 
-        formData.value = { id: 0, code: '', type: 'PR', date: getToday(), items: [], note: '', status: 'pending', displayStatus: 'pending' } 
+        formData.value = { id: 0, code: '', type: 'PR', date: getToday(), partnerId: '', items: [], note: '', status: 'pending', displayStatus: 'pending' } 
     }
     productSearchQuery.value = ''
     showModal.value = true
@@ -196,7 +209,8 @@ const handleAddItem = (prod) => {
         formData.value.items.unshift({ 
             variantId: prod.id, sku: prod.sku, name: prod.name, 
             unit: prod.unit || 'SL', units: units, 
-            selectedUnit: defaultUnit.name, inputQty: 1, qty: defaultUnit.rate
+            selectedUnit: defaultUnit.name, inputQty: 1, qty: defaultUnit.rate,
+            price: prod.importPrice || prod.ImportPrice || prod.price || 0 // FIX: Gán dự toán
         })
     } else { 
         existing.inputQty += 1; calcActual(existing);
@@ -213,24 +227,30 @@ const removeItem = (index) => {
     formData.value.items.splice(index, 1)
 }
 
+// BỔ SUNG: Tính tổng tiền dự toán
+const totalAmount = computed(() => formData.value.items.reduce((sum, item) => sum + (item.qty * (item.price || 0)), 0))
+
 // ĐÃ FIX 400 BAD REQUEST: XỬ LÝ LỌC DỮ LIỆU SẠCH TRƯỚC KHI GỬI C#
 const handleSubmit = async () => {
     if (formData.value.items.length === 0) return alert('Chưa chọn hàng hóa nào để xin mua!')
     try {
-        // TẠO DỮ LIỆU SẠCH: Loại bỏ hết rác frontend như 'units', 'inputQty', 'displayStatus'
+        // TÍNH NĂNG VIP: TỰ ĐỘNG DUYỆT NẾU LÀ SẾP LẬP PHIẾU
+        const isAutoApprove = ['admin', 'giam_doc', 'gdcn', 'gd_chi_nhanh'].includes(currentRole);
+        const finalStatus = isAutoApprove ? 'approved' : 'pending';
+
         const cleanPayload = { 
             id: modalMode.value === 'add' ? 0 : formData.value.id,
             code: modalMode.value === 'add' ? "" : formData.value.code, 
             type: 'PR',
             date: formData.value.date,
             note: formData.value.note || "",
-            status: 'pending',
-            totalAmount: 0, // PR chưa có giá
-            partnerId: null, // PR chưa có NCC
+            status: finalStatus, 
+            totalAmount: totalAmount.value, // FIX: Gửi tổng tiền dự toán lên
+            partnerId: formData.value.partnerId || null, // FIX: Gửi NCC đề xuất lên
             items: formData.value.items.map(i => ({
                 variantId: i.variantId || i.VariantId,
                 qty: i.qty,
-                price: 0
+                price: i.price || 0 // FIX: Gửi giá dự kiến lên
             }))
         };
         
@@ -242,12 +262,14 @@ const handleSubmit = async () => {
         })
         
         if (res.ok) { 
-            alert('Lập phiếu xin mua (PR) thành công!'); await fetchData(); closeModal(); 
+            const msg = isAutoApprove 
+                ? 'Sếp lập phiếu nên hệ thống đã TỰ ĐỘNG DUYỆT. Chuyển sang chờ báo giá!' 
+                : 'Lập Yêu cầu xin mua (PR) thành công!';
+            alert(msg); 
+            await fetchData(); closeModal(); 
         } else { 
-            // IN CHI TIẾT LỖI TỪ BACKEND ĐỂ DỄ DÀNG SỬA NẾU CÓ
             const errText = await res.text();
             alert('LỖI TỪ HỆ THỐNG C#:\n' + errText); 
-            console.log("Payload đã gửi:", cleanPayload);
         }
     } catch(e) { console.error(e) }
 }
@@ -297,21 +319,22 @@ onMounted(() => fetchData())
 
     <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
       <div class="w-full overflow-x-auto custom-scrollbar">
-        <table class="min-w-[1000px] w-full divide-y divide-gray-200">
+        <table class="min-w-[1100px] w-full divide-y divide-gray-200">
           <thead class="bg-gray-50">
             <tr>
                 <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase">Mã Phiếu</th>
                 <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase">Ngày lập</th>
+                <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase min-w-[150px]">NCC Đề xuất</th>
                 <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase min-w-[200px]">Nội dung yêu cầu</th>
                 <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase min-w-[150px]">Số lượng</th>
-                <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase w-64">Ghi chú</th>
+                <th v-if="canApprovePR" class="px-5 py-3.5 text-right text-xs font-bold text-gray-500 uppercase">Dự toán</th>
                 <th class="px-5 py-3.5 text-center text-xs font-bold text-gray-500 uppercase">Trạng thái</th>
                 <th class="px-5 py-3.5 text-right text-xs font-bold text-gray-500 uppercase">Thao tác</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-100 bg-white">
             <tr v-if="filteredPRs.length === 0">
-                <td colspan="7" class="px-6 py-16 text-center">
+                <td :colspan="canApprovePR ? 8 : 7" class="px-6 py-16 text-center">
                     <DocumentDuplicateIcon class="w-12 h-12 text-gray-300 mx-auto mb-3" />
                     <h3 class="text-base font-semibold text-gray-700">Chưa có yêu cầu xin mua hàng nào</h3>
                 </td>
@@ -323,6 +346,11 @@ onMounted(() => fetchData())
               </td>
               <td class="px-5 py-3 text-sm font-medium text-gray-600">{{ order.date }}</td>
               
+              <td class="px-5 py-3 text-sm text-gray-700">
+                  <span v-if="order.supplierName" class="font-bold text-indigo-600">{{ order.supplierName }}</span>
+                  <span v-else class="text-xs italic text-gray-400">Chưa rõ NCC</span>
+              </td>
+
               <td class="px-5 py-3">
                   <span class="text-sm font-bold text-gray-800 line-clamp-2" :title="getItemNames(order.items)">{{ getItemNames(order.items) }}</span>
                   <span class="text-[10px] text-gray-500 font-medium block mt-0.5">(Gồm {{ order.items?.length || 0 }} mặt hàng)</span>
@@ -331,8 +359,10 @@ onMounted(() => fetchData())
                   <span class="text-sm font-bold text-indigo-600 line-clamp-2" :title="getItemQuantities(order.items)">{{ getItemQuantities(order.items) }}</span>
               </td>
               
-              <td class="px-5 py-3 text-sm text-gray-600 truncate max-w-xs">{{ order.note || '---' }}</td>
-              
+              <td v-if="canApprovePR" class="px-5 py-3 text-right font-bold text-emerald-600">
+                  {{ formatCurrency(order.totalAmount || 0) }}
+              </td>
+
               <td class="px-5 py-3 text-center">
                   <span :class="['text-[10px] font-bold px-2 py-1 rounded border uppercase tracking-wider', getStatusBadge(order.displayStatus).class]">
                       {{ getStatusBadge(order.displayStatus).text }}
@@ -374,7 +404,7 @@ onMounted(() => fetchData())
             <form id="prForm" @submit.prevent="handleSubmit" class="space-y-6">
               
               <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
                       <label class="block text-xs font-bold mb-1 text-gray-700">Mã Phiếu</label>
                       <input type="text" disabled class="w-full border rounded-lg px-3 py-2 text-sm bg-gray-100 italic font-bold text-gray-500" :placeholder="modalMode === 'add' ? 'Hệ thống tự động sinh' : formData.code">
@@ -382,6 +412,13 @@ onMounted(() => fetchData())
                   <div>
                       <label class="block text-xs font-bold mb-1 text-gray-700">Ngày lập yêu cầu *</label>
                       <input v-model="formData.date" :disabled="modalMode === 'view'" type="date" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-500">
+                  </div>
+                  <div>
+                      <label class="block text-xs font-bold mb-1 text-indigo-700">Nhà CC Đề xuất (Tùy chọn)</label>
+                      <select v-model="formData.partnerId" :disabled="modalMode === 'view'" class="w-full border border-indigo-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer">
+                          <option value="">-- Chưa xác định NCC --</option>
+                          <option v-for="sup in suppliersList" :key="sup.partnerId" :value="sup.partnerId">{{ sup.partnerName }}</option>
+                      </select>
                   </div>
                 </div>
               </div>
@@ -414,13 +451,15 @@ onMounted(() => fetchData())
                           <th class="px-4 py-3 w-32">Mã SKU</th>
                           <th class="px-4 py-3 min-w-[200px]">Tên Hàng Hóa</th>
                           <th class="px-4 py-3 text-center border-l border-gray-200 w-32">Đơn Vị Tính</th>
-                          <th class="px-4 py-3 text-center bg-indigo-50 border-l border-gray-200 w-40 text-indigo-800">Số Lượng</th>
+                          <th class="px-4 py-3 text-center bg-indigo-50 border-l border-gray-200 w-32 text-indigo-800">Số Lượng</th>
+                          <th v-if="canApprovePR" class="px-4 py-3 text-right bg-emerald-50 border-l border-gray-200 w-32 text-emerald-800">Dự Toán/1 ĐVT</th>
+                          <th v-if="canApprovePR" class="px-4 py-3 text-right bg-emerald-50 border-l border-gray-200 w-32 text-emerald-800">Thành Tiền</th>
                           <th v-if="modalMode !== 'view'" class="px-4 py-3 text-center w-12 border-l border-gray-200">#</th>
                       </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-100">
                       <tr v-if="formData.items.length === 0">
-                          <td :colspan="modalMode !== 'view' ? 5 : 4" class="px-4 py-12 text-center text-gray-400 italic">Vui lòng tra cứu và thêm sản phẩm.</td>
+                          <td :colspan="canApprovePR ? (modalMode !== 'view' ? 7 : 6) : (modalMode !== 'view' ? 5 : 4)" class="px-4 py-12 text-center text-gray-400 italic">Vui lòng tra cứu và thêm sản phẩm.</td>
                       </tr>
                       
                       <tr v-for="(item, idx) in formData.items" :key="idx" class="hover:bg-indigo-50/30 transition-colors">
@@ -448,6 +487,14 @@ onMounted(() => fetchData())
                             </div>
                         </td>
                         
+                        <td v-if="canApprovePR" class="px-4 py-3 text-right bg-emerald-50/20 border-l border-gray-100">
+                            <input v-if="modalMode !== 'view'" v-model.number="item.price" type="number" min="0" class="w-full text-right border border-emerald-200 rounded px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-emerald-500">
+                            <span v-else class="font-bold text-gray-700">{{ formatCurrency(item.price) }}</span>
+                        </td>
+                        <td v-if="canApprovePR" class="px-4 py-3 text-right bg-emerald-50/20 border-l border-gray-100 font-bold text-emerald-700">
+                            {{ formatCurrency(item.qty * item.price) }}
+                        </td>
+
                         <td v-if="modalMode !== 'view'" class="px-4 py-3 text-center border-l border-gray-100">
                             <button type="button" @click="removeItem(idx)" class="text-red-400 hover:text-red-600 transition-colors">
                                 <TrashIcon class="w-5 h-5 mx-auto"/>
@@ -455,6 +502,13 @@ onMounted(() => fetchData())
                         </td>
                       </tr>
                     </tbody>
+                    <tfoot v-if="canApprovePR" class="bg-gray-50 font-bold border-t border-gray-200">
+                      <tr>
+                          <td colspan="5" class="px-4 py-3 text-right uppercase text-gray-600">Tổng Dự Toán Tạm Tính:</td>
+                          <td class="px-4 py-3 text-right text-emerald-700 text-lg">{{ formatCurrency(totalAmount) }}</td>
+                          <td v-if="modalMode !== 'view'"></td>
+                      </tr>
+                    </tfoot>
                   </table>
                 </div>
               </div>

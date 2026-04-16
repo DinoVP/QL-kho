@@ -2,8 +2,8 @@
 import { ref, computed, onMounted } from 'vue'
 import { useAuth } from '@/composables/useAuth' 
 import { 
-  MagnifyingGlassIcon, EyeIcon, XMarkIcon, 
-  PencilSquareIcon, CheckCircleIcon, ArrowRightCircleIcon, 
+  MagnifyingGlassIcon, PlusIcon, EyeIcon, 
+  XMarkIcon, PencilSquareIcon, CheckCircleIcon, ArrowRightCircleIcon, 
   BuildingStorefrontIcon, ShoppingCartIcon
 } from '@heroicons/vue/24/outline'
 
@@ -145,7 +145,8 @@ const openModal = (mode, order = null) => {
 
             let suggestedPrice = i.price || i.Price || 0;
             if (suggestedPrice === 0 && mode === 'convert_po') {
-                suggestedPrice = prod.importPrice || prod.ImportPrice || 0;
+                // ĐÃ FIX VÀ BỔ SUNG: Thêm fallback dự phòng lấy "price" cũ nếu data chưa kịp nâng cấp lên "importPrice"
+                suggestedPrice = prod.importPrice || prod.ImportPrice || prod.price || prod.Price || 0;
             }
 
             return {

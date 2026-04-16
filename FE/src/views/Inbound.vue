@@ -3,32 +3,31 @@ import { ref, computed, onMounted } from 'vue'
 import { 
   MagnifyingGlassIcon, PlusIcon, EyeIcon, 
   XMarkIcon, DocumentTextIcon, TrashIcon,
-  CheckCircleIcon, ArrowDownTrayIcon, ArchiveBoxArrowDownIcon, PrinterIcon
+  CheckCircleIcon, ArrowDownTrayIcon, ArchiveBoxArrowDownIcon, PrinterIcon,
+  ArrowsRightLeftIcon
 } from '@heroicons/vue/24/outline'
 
 const INBOUND_API = 'https://localhost:7139/api/Inbound'
 const PROD_API = 'https://localhost:7139/api/Products'
 const PARTNER_API = 'https://localhost:7139/api/CrmPartners' 
+const WAREHOUSE_API = 'https://localhost:7139/api/Warehouses'
 
 const getAuthHeaders = () => ({ 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (localStorage.getItem('authToken') || '') })
 
 const currentUserRole = ref(localStorage.getItem('role') || 'ql_kho')
+// ID kho mà user hiện tại đang quản lý (Nếu là Thu mua/Giám đốc thì = null)
 const myWarehouseId = ref(parseInt(localStorage.getItem('warehouseId')) || null)
 
-// =========================================================================
-// ĐÃ FIX PHÂN QUYỀN CHUẨN: 
-// 1. canApprove: Chỉ Giám đốc / Admin mới được duyệt phiếu
-// 2. canConfirmPutaway: QL Kho được bấm nhận hàng vào bãi
-// =========================================================================
 const currentRole = currentUserRole.value.toLowerCase()
-const canCreate = computed(() => ['admin', 'nv_thu_mua'].includes(currentRole))
-const canViewPrice = computed(() => ['admin', 'giam_doc', 'gd_chi_nhanh', 'nv_thu_mua'].includes(currentRole))
-const canApprove = computed(() => ['admin', 'giam_doc', 'gd_chi_nhanh'].includes(currentRole)) 
+const canCreate = computed(() => ['admin', 'nv_thu_mua', 'giam_doc', 'gdcn', 'gd_chi_nhanh'].includes(currentRole))
+const canViewPrice = computed(() => ['admin', 'giam_doc', 'gd_chi_nhanh', 'gdcn', 'nv_thu_mua'].includes(currentRole))
+const canApprove = computed(() => ['admin', 'giam_doc', 'gd_chi_nhanh', 'gdcn'].includes(currentRole)) 
 const canConfirmPutaway = computed(() => ['admin', 'ql_kho'].includes(currentRole))
 
 const receipts = ref([])
 const productsList = ref([])
 const partnersList = ref([])
+const warehousesList = ref([]) // Biến lưu danh sách Kho
 const isLoading = ref(false)
 
 const getToday = () => new Date().toISOString().split('T')[0]
@@ -46,12 +45,6 @@ const getUnitChain = (prod) => {
         units.push({ name: 'Thùng/Kiện', rate: cr, rel: cr });
     }
     return units.sort((a,b) => a.rate - b.rate);
-}
-
-const buildChainEditor = (units) => {
-    let chain = [];
-    for(let i = 1; i < units.length; i++) { chain.push({ name: units[i].name, prevName: units[i-1].name, rel: units[i].rate / units[i-1].rate }); }
-    return chain;
 }
 
 const autoFormatStockText = (qty, units, baseUnit) => {
@@ -82,29 +75,67 @@ const autoFormatStockText = (qty, units, baseUnit) => {
     return components.map(c => `${c.count} ${c.name}`).join(' + ');
 }
 
+const getFullChainExplanation = (item) => {
+    if (!item || !item.units || item.units.length === 0) return '';
+    const selectedIdx = item.units.findIndex(u => u.name === item.selectedUnit);
+    if (selectedIdx <= 0) return `${item.inputQty || 0} ${item.baseUnit}`;
+
+    let parts = [];
+    let totalBaseQty = (item.inputQty || 0) * item.units[selectedIdx].rate;
+
+    for (let i = selectedIdx; i >= 0; i--) {
+        let qtyAtTier = Math.round((totalBaseQty / item.units[i].rate) * 1000) / 1000;
+        parts.push(`${qtyAtTier} ${item.units[i].name}`);
+    }
+    return parts.join(' = ');
+}
+
 const fetchData = async () => {
   isLoading.value = true
   try {
     const headers = getAuthHeaders()
-    const [inboundRes, prodRes, partnerRes] = await Promise.all([
-      fetch(INBOUND_API, { headers }), fetch(PROD_API, { headers }), fetch(PARTNER_API, { headers })
+    const [inboundRes, prodRes, partnerRes, warehouseRes] = await Promise.all([
+      fetch(INBOUND_API, { headers }).catch(() => ({ ok: false })), 
+      fetch(PROD_API, { headers }).catch(() => ({ ok: false })), 
+      fetch(PARTNER_API, { headers }).catch(() => ({ ok: false })),
+      fetch(WAREHOUSE_API, { headers }).catch(() => ({ ok: false })) // Fetch danh sách kho
     ])
     
     if (prodRes.ok) productsList.value = await prodRes.json()
+    
     if (partnerRes.ok) {
       const pData = await partnerRes.json()
       const rawPartners = pData.data || pData.Data || pData || []
       partnersList.value = rawPartners.filter(p => p.isSupplier || p.partnerCode?.startsWith('NC'))
     }
+
+    // Load danh sách kho (Dùng dữ liệu giả nếu chưa code BE phần Kho)
+    if (warehouseRes && warehouseRes.ok) {
+        const wData = await warehouseRes.json();
+        warehousesList.value = wData.data || wData.Data || wData || [];
+    } else {
+        // Fallback tạm thời nếu chưa có API WmsWarehouses
+        warehousesList.value = [
+            { id: 1, warehouseId: 1, whname: 'Kho Tổng Trung Tâm', name: 'Kho Tổng Trung Tâm' },
+            { id: 2, warehouseId: 2, whname: 'Kho Vật tư MRO', name: 'Kho Vật tư MRO' }
+        ];
+    }
     
     if (inboundRes.ok) {
       const rawData = await inboundRes.json()
+      
+      // 🚀 LOGIC CÁCH LY DỮ LIỆU: Nếu myWarehouseId có giá trị (tức là user là Thủ kho), chỉ lấy phiếu của kho đó.
       const filteredData = rawData.filter(r => !myWarehouseId.value || r.warehouseId === myWarehouseId.value || r.WarehouseId === myWarehouseId.value)
 
       receipts.value = filteredData.map(r => {
         if (!r.code && r.id) r.code = `PN${r.id.toString().padStart(4, '0')}`;
+        
         const partner = partnersList.value.find(p => p.partnerId === r.partnerId || p.id === r.partnerId || p.Id === r.partnerId);
         r.partnerName = partner ? (partner.partnerName || partner.name || partner.Name) : 'NCC Khác';
+
+        // Ghép tên Kho để hiển thị ra bảng ngoài
+        const wh = warehousesList.value.find(w => w.warehouseId === r.warehouseId || w.id === r.warehouseId);
+        r.warehouseName = wh ? (wh.whname || wh.whName || wh.name) : 'Kho mặc định';
         
         r.formattedItems = (r.items || r.Items || []).map(i => {
             const variantId = i.variantId || i.VariantId;
@@ -127,7 +158,7 @@ const filteredReceipts = computed(() => {
 })
 
 const showModal = ref(false); const modalMode = ref('add') 
-const formData = ref({ id: 0, code: '', date: getToday(), partnerId: '', warehouseId: myWarehouseId.value, items: [], note: '', status: 'pending' })
+const formData = ref({ id: 0, code: '', date: getToday(), partnerId: '', warehouseId: '', items: [], note: '', status: 'pending' })
 
 const openModal = (mode, receipt = null) => {
   modalMode.value = mode
@@ -136,11 +167,10 @@ const openModal = (mode, receipt = null) => {
       const variantId = i.variantId || i.VariantId;
       const prod = productsList.value.find(p => p.id === variantId || p.Id === variantId) || {};
       const units = getUnitChain(prod);
-      const chain = buildChainEditor(units); 
 
       return {
         variantId: variantId, sku: prod.sku || prod.Sku || (i.sku || i.Sku), name: prod.name || prod.Name || (i.name || i.Name), 
-        baseUnit: prod.unit || prod.Unit || 'SL', units: units, chain: chain, selectedUnit: units[units.length - 1].name,
+        baseUnit: prod.unit || prod.Unit || 'SL', units: units, selectedUnit: units[units.length - 1].name,
         qty: i.qty || i.Qty || 0, inputQty: 1, 
         price: i.price || i.Price || prod.importPrice || prod.ImportPrice || 0, 
         nsx: i.nsx || i.Nsx ? (i.nsx || i.Nsx).split('T')[0] : '', hsd: i.hsd || i.Hsd ? (i.hsd || i.Hsd).split('T')[0] : ''
@@ -148,10 +178,14 @@ const openModal = (mode, receipt = null) => {
     });
     formData.value = { 
         id: receipt.id || receipt.Id, code: receipt.code || receipt.Code, date: receipt.date || receipt.Date, 
-        partnerId: receipt.partnerId || receipt.PartnerId || '', warehouseId: receipt.warehouseId || receipt.WarehouseId || myWarehouseId.value,
+        partnerId: receipt.partnerId || receipt.PartnerId || '', 
+        warehouseId: receipt.warehouseId || receipt.WarehouseId || '', // Lấy kho của phiếu
         items: safeItems, note: receipt.note || receipt.Note, status: receipt.status || receipt.Status 
     };
-  } else { formData.value = { id: 0, code: '', date: getToday(), partnerId: '', warehouseId: myWarehouseId.value, items: [], note: '', status: 'pending' } }
+  } else { 
+    // Mở Form mới thì reset trạng thái, ép người dùng chọn Kho
+    formData.value = { id: 0, code: '', date: getToday(), partnerId: '', warehouseId: '', items: [], note: '', status: 'pending' } 
+  }
   selectedProductIds.value = []; productSearchQuery.value = ''; showModal.value = true
 }
 const closeModal = () => showModal.value = false
@@ -187,21 +221,15 @@ const handleAddProducts = () => {
     const prod = productsList.value.find(p => p.id === pid || p.Id === pid)
     if (prod && !formData.value.items.find(i => i.variantId === pid)) {
         const units = getUnitChain(prod);
-        const chain = buildChainEditor(units); 
         const defaultUnit = units[units.length - 1]; 
         formData.value.items.push({ 
           variantId: pid, sku: prod.sku || prod.Sku, name: prod.name || prod.Name, baseUnit: prod.unit || prod.Unit || 'SL', 
-          units: units, chain: chain, selectedUnit: defaultUnit.name, inputQty: 1, 
+          units: units, selectedUnit: defaultUnit.name, inputQty: 1, 
           price: prod.importPrice || prod.ImportPrice || 0, nsx: '', hsd: '' 
         })
     }
   })
   selectedProductIds.value = []; productSearchQuery.value = '' 
-}
-
-const recalcAllUnits = (item) => {
-    let currentRate = 1; item.units[0].rate = 1; 
-    item.chain.forEach(c => { currentRate = currentRate * (c.rel || 1); let targetUnit = item.units.find(x => x.name === c.name); if (targetUnit) targetUnit.rate = currentRate; });
 }
 
 const removeItem = (index) => formData.value.items.splice(index, 1)
@@ -214,19 +242,55 @@ const getItemTotalQty = (item) => {
 
 const handleSubmit = async () => {
   if (!formData.value.partnerId) return alert('Vui lòng chọn Nhà cung cấp!');
+  if (!formData.value.warehouseId) return alert('Vui lòng chọn Kho Nhập!'); // Ràng buộc bắt buộc chọn kho
   if (formData.value.items.length === 0) return alert('Chưa có sản phẩm nào trong phiếu!')
+  
   try {
-    const payload = { ...formData.value, code: "", warehouseId: myWarehouseId.value || 1 };
+    const isAutoApprove = ['admin', 'giam_doc', 'gdcn', 'gd_chi_nhanh'].includes(currentRole);
+    const targetStatus = isAutoApprove ? 'approved' : 'pending';
+
+    const payload = { ...formData.value, code: "", status: targetStatus };
+    
     payload.items = payload.items.map(i => {
         const summary = i.units.filter(u => u.rate > 1).map(u => `1 ${u.name}=${u.rate}`).join(', ');
         return { 
-            variantId: i.variantId, qty: getItemTotalQty(i), price: i.price || 0, 
-            nsx: i.nsx || null, hsd: i.hsd || null, locationId: null, note: `Nhập ${i.inputQty} ${i.selectedUnit} (${summary})`
+            variantId: i.variantId, 
+            qty: getItemTotalQty(i), 
+            price: i.price || 0, 
+            nsx: i.nsx || null, 
+            hsd: i.hsd || null, 
+            locationId: null, 
+            note: `Nhập ${i.inputQty} ${i.selectedUnit} (${summary})`
         }
     });
-    const res = await fetch(INBOUND_API, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(payload) })
-    if (res.ok) { alert('Lập Phiếu thành công! QL Kho sẽ tiến hành duyệt.'); await fetchData(); closeModal(); } else alert('LỖI HỆ THỐNG');
-  } catch(e) { console.error(e) }
+
+    const res = await fetch(INBOUND_API, { 
+      method: 'POST', 
+      headers: getAuthHeaders(), 
+      body: JSON.stringify(payload) 
+    })
+
+    if (res.ok) { 
+        const msg = isAutoApprove 
+            ? 'Lập Phiếu thành công! Phiếu đã TỰ ĐỘNG DUYỆT.' 
+            : 'Lập Phiếu thành công! Vui lòng chờ Giám Đốc duyệt.';
+        alert(msg); 
+        await fetchData(); 
+        closeModal(); 
+    } else { 
+        const errorData = await res.json();
+        let errorMessage = "Hệ thống từ chối (400 Bad Request):\n";
+        if (errorData.errors) {
+            for (const key in errorData.errors) errorMessage += `- ${key}: ${errorData.errors[key].join(', ')}\n`;
+        } else if (errorData.message) errorMessage += errorData.message;
+        else if (errorData.title) errorMessage += errorData.title;
+        
+        alert(errorMessage); 
+    }
+  } catch(e) { 
+    console.error(e);
+    alert('Lỗi kết nối máy chủ!');
+  }
 }
 
 const handleApprove = async (id) => { if(confirm("Duyệt phiếu này?")) { await fetch(`${INBOUND_API}/${id}/approve`, { method: 'PUT', headers: getAuthHeaders() }); fetchData(); } }
@@ -262,6 +326,7 @@ onMounted(() => fetchData())
               <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider w-24">Mã Phiếu</th>
               <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider w-32">Ngày lập</th>
               <th class="px-5 py-3.5 text-left text-xs font-bold text-blue-700 uppercase tracking-wider w-40">Nhà Cung Cấp</th>
+              <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">Kho Nhận</th>
               <th class="px-5 py-3.5 text-left text-xs font-bold text-emerald-700 uppercase tracking-wider">Chi Tiết Hàng</th>
               <th v-if="canViewPrice" class="px-5 py-3.5 text-right text-xs font-bold text-gray-500 uppercase tracking-wider w-32">Tổng Tiền</th>
               <th class="px-5 py-3.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Trạng thái</th>
@@ -269,10 +334,12 @@ onMounted(() => fetchData())
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-100 bg-white">
-            <tr v-if="filteredReceipts.length === 0"><td :colspan="canViewPrice ? 7 : 6" class="px-6 py-16 text-center"><ArrowDownTrayIcon class="w-12 h-12 text-gray-300 mx-auto mb-3" /><h3 class="text-base font-semibold text-gray-700">Chưa có Phiếu Nhập nào</h3></td></tr>
+            <tr v-if="filteredReceipts.length === 0"><td :colspan="canViewPrice ? 8 : 7" class="px-6 py-16 text-center"><ArrowDownTrayIcon class="w-12 h-12 text-gray-300 mx-auto mb-3" /><h3 class="text-base font-semibold text-gray-700">Chưa có Phiếu Nhập nào</h3></td></tr>
             <tr v-for="receipt in filteredReceipts" :key="receipt.id" class="hover:bg-gray-50 transition-colors">
               <td class="px-5 py-3 text-sm font-bold text-primary-700">{{ receipt.code }}</td><td class="px-5 py-3 text-sm font-medium text-gray-600">{{ receipt.date }}</td>
               <td class="px-5 py-3 text-sm font-bold text-blue-700">{{ receipt.partnerName }}</td>
+              
+              <td class="px-5 py-3 text-[11px] font-bold text-gray-700 uppercase">{{ receipt.warehouseName }}</td>
               
               <td class="px-5 py-3 text-sm">
                 <div v-for="(fi, idx) in receipt.formattedItems" :key="idx" class="mb-1 text-gray-800 flex items-center flex-wrap gap-1.5">
@@ -304,16 +371,25 @@ onMounted(() => fetchData())
       <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center px-4 bg-slate-900/50 backdrop-blur-sm animate-fade-in">
         <div class="bg-white rounded-xl shadow-2xl w-full max-w-[95vw] lg:max-w-7xl overflow-hidden flex flex-col max-h-[90vh]">
           
-          <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50 shrink-0"><h3 class="text-lg font-bold flex items-center gap-2"><ArrowDownTrayIcon class="w-6 h-6 text-primary-600"/> {{ modalMode === 'add' ? 'Lập Phiếu Nhập Kho (NV Thu Mua)' : `Chi tiết: ${formData.code}` }}</h3><button @click="closeModal" class="text-gray-400 hover:text-red-500"><XMarkIcon class="w-6 h-6" /></button></div>
+          <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50 shrink-0"><h3 class="text-lg font-bold flex items-center gap-2"><ArrowDownTrayIcon class="w-6 h-6 text-primary-600"/> {{ modalMode === 'add' ? 'Lập Phiếu Nhập Kho' : `Chi tiết Phiếu: ${formData.code}` }}</h3><button @click="closeModal" class="text-gray-400 hover:text-red-500"><XMarkIcon class="w-6 h-6" /></button></div>
           
           <div class="p-6 overflow-y-auto flex-1 custom-scrollbar">
             <form id="inboundForm" @submit.prevent="handleSubmit" class="space-y-6">
               
-              <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-lg border border-slate-200">
+              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 bg-slate-50 p-4 rounded-lg border border-slate-200">
                 <div>
                   <label class="block text-xs font-bold mb-1">Nhà cung cấp *</label>
-                  <select v-model="formData.partnerId" :disabled="modalMode === 'view'" required class="w-full border rounded-lg px-3 py-2 text-sm bg-white cursor-pointer"><option value="" disabled>-- Chọn --</option><option v-for="p in partnersList" :key="p.partnerId||p.id" :value="p.partnerId||p.id">{{ p.partnerName||p.name }}</option></select>
+                  <select v-model="formData.partnerId" :disabled="modalMode === 'view'" required class="w-full border rounded-lg px-3 py-2 text-sm bg-white cursor-pointer"><option value="" disabled>-- Chọn NCC --</option><option v-for="p in partnersList" :key="p.partnerId||p.id" :value="p.partnerId||p.id">{{ p.partnerName||p.name }}</option></select>
                 </div>
+                
+                <div>
+                  <label class="block text-xs font-bold mb-1 text-indigo-700">Kho Nhập *</label>
+                  <select v-model="formData.warehouseId" :disabled="modalMode === 'view'" required class="w-full border border-indigo-300 rounded-lg px-3 py-2 text-sm bg-white cursor-pointer focus:ring-1 focus:ring-indigo-500 font-bold text-indigo-800">
+                    <option value="" disabled>-- Chọn Kho --</option>
+                    <option v-for="w in warehousesList" :key="w.warehouseId || w.id" :value="w.warehouseId || w.id">{{ w.whname || w.name || w.whName }}</option>
+                  </select>
+                </div>
+
                 <div><label class="block text-xs font-bold mb-1">Ngày lập *</label><input v-model="formData.date" :disabled="modalMode === 'view'" type="date" required class="w-full border bg-white rounded-lg px-3 py-2 text-sm"></div>
                 <div><label class="block text-xs font-bold mb-1">Trạng thái</label><div class="px-3 py-2 text-sm font-bold rounded border text-center" :class="getStatusBadge(formData.status).class">{{ getStatusBadge(formData.status).text }}</div></div>
               </div>
@@ -321,61 +397,56 @@ onMounted(() => fetchData())
               <div v-if="modalMode === 'add'" class="bg-blue-50 p-4 rounded-xl border border-blue-100">
                 <label class="text-sm font-bold text-blue-800 mb-2 block">Tìm & Chọn Hàng hóa:</label>
                 <input v-model="productSearchQuery" type="text" class="w-full border border-blue-200 rounded px-3 py-1.5 text-sm mb-2 outline-none focus:ring-1 focus:ring-blue-500 bg-white" placeholder="🔍 Gõ tên hoặc mã SKU...">
-                <div class="bg-white border border-blue-200 rounded max-h-32 overflow-y-auto p-2">
-                  <label v-for="p in filteredProducts" :key="p.id||p.Id" class="flex items-center gap-3 p-2 hover:bg-blue-50 cursor-pointer border-b"><input type="checkbox" :value="p.id||p.Id" v-model="selectedProductIds" class="w-4 h-4 text-blue-600 rounded"><span class="text-sm flex-1 font-medium">[{{ p.sku||p.Sku }}] {{ p.name||p.Name }}</span></label>
+                <div class="bg-white border border-blue-200 rounded max-h-32 overflow-y-auto p-2 custom-scrollbar">
+                  <label v-for="p in filteredProducts" :key="p.id||p.Id" class="flex items-center gap-3 p-2 hover:bg-blue-50 cursor-pointer border-b last:border-0"><input type="checkbox" :value="p.id||p.Id" v-model="selectedProductIds" class="w-4 h-4 text-blue-600 rounded"><span class="text-sm flex-1 font-medium">[{{ p.sku||p.Sku }}] {{ p.name||p.Name }}</span></label>
                 </div>
-                <button type="button" @click="handleAddProducts" class="mt-2 px-4 py-1.5 bg-blue-600 text-white rounded text-sm font-bold disabled:opacity-50 shadow-sm" :disabled="selectedProductIds.length === 0">Đưa {{selectedProductIds.length}} SP xuống lưới</button>
+                <button type="button" @click="handleAddProducts" class="mt-2 px-4 py-1.5 bg-blue-600 text-white rounded text-sm font-bold disabled:opacity-50 shadow-sm transition-colors hover:bg-blue-700" :disabled="selectedProductIds.length === 0">Đưa {{selectedProductIds.length}} SP xuống lưới</button>
               </div>
 
               <div class="border rounded-lg overflow-x-auto shadow-sm">
                 <table class="w-full text-sm text-left">
                   <thead class="bg-gray-50 text-xs uppercase font-bold text-gray-500 border-b">
                     <tr>
-                      <th class="px-3 py-3 min-w-[150px]">Sản Phẩm</th>
-                      <th class="px-3 py-3 text-center w-28">NSX - HSD</th>
-                      <th v-if="modalMode === 'add'" class="px-3 py-3 text-right bg-amber-50 text-amber-700 min-w-[200px] border-l">Chuỗi Quy cách</th>
-                      <th v-if="modalMode === 'add'" class="px-3 py-3 text-center bg-blue-50 text-blue-700 w-32 border-l">ĐVT</th>
-                      <th v-if="modalMode === 'add'" class="px-3 py-3 text-center bg-blue-50 text-blue-700 w-28">SL Nhập</th>
-                      <th class="px-3 py-3 text-center bg-emerald-50 text-emerald-800 border-l min-w-[250px]">Tổng Lẻ</th>
-                      <th v-if="canViewPrice" class="px-3 py-3 text-right bg-indigo-50 text-indigo-700 border-l w-28">Giá Nhập</th>
+                      <th class="px-3 py-3 min-w-[200px]">Sản Phẩm</th>
+                      <th class="px-3 py-3 text-center w-32 border-l">NSX - HSD</th>
+                      <th v-if="modalMode === 'add'" class="px-3 py-3 text-center bg-blue-50 text-blue-700 w-44 border-l">Nhập (SL & ĐVT)</th>
+                      <th class="px-3 py-3 text-center bg-emerald-50 text-emerald-800 border-l min-w-[250px]">Tổng Lẻ (Gốc)</th>
+                      <th v-if="canViewPrice" class="px-3 py-3 text-right bg-indigo-50 text-indigo-700 border-l w-32">Giá Nhập (1 ĐVT gốc)</th>
                       <th v-if="canViewPrice" class="px-3 py-3 text-right bg-indigo-50 text-indigo-700 border-l w-32">Thành tiền</th>
-                      <th v-if="modalMode === 'add'" class="px-3 py-3 text-center w-10 border-l">#</th>
+                      <th v-if="modalMode === 'add'" class="px-3 py-3 text-center w-12 border-l">#</th>
                     </tr>
                   </thead>
                   <tbody class="divide-y divide-gray-100">
-                    <tr v-if="formData.items.length === 0"><td :colspan="canViewPrice ? 9 : 7" class="px-4 py-8 text-center text-gray-400 italic">Chưa có sản phẩm nào.</td></tr>
+                    <tr v-if="formData.items.length === 0"><td :colspan="canViewPrice ? 7 : 5" class="px-4 py-8 text-center text-gray-400 italic">Chưa có sản phẩm nào.</td></tr>
                     <tr v-for="(item, idx) in formData.items" :key="idx" class="hover:bg-gray-50">
-                        <td class="px-3 py-2"><div class="font-bold text-gray-800">{{ item.sku }}</div><div class="text-xs text-gray-600">{{ item.name }}</div></td>
-                        
-                        <td class="px-3 py-2 text-center flex flex-col gap-1">
-                            <input v-if="modalMode === 'add'" v-model="item.nsx" type="date" class="border border-gray-300 rounded px-1 py-1 text-[10px] bg-white">
-                            <span v-else class="text-[10px] text-gray-500 font-bold bg-gray-100 px-1 py-0.5 rounded">NSX: {{item.nsx || '--'}}</span>
-                            <input v-if="modalMode === 'add'" v-model="item.hsd" type="date" class="border border-gray-300 rounded px-1 py-1 text-[10px] bg-white">
-                            <span v-else class="text-[10px] text-red-500 font-bold bg-red-50 px-1 py-0.5 rounded border border-red-100">HSD: {{item.hsd || '--'}}</span>
+                        <td class="px-3 py-3">
+                            <div class="font-bold text-gray-800">{{ item.sku }}</div>
+                            <div class="text-xs text-gray-600 mt-0.5">{{ item.name }}</div>
                         </td>
                         
-                        <td v-if="modalMode === 'add'" class="px-3 py-2 bg-amber-50/10 border-l">
-                            <div v-if="item.chain && item.chain.length > 0" class="flex flex-col gap-1.5 justify-center pr-2">
-                                <div v-for="(c, cIdx) in item.chain" :key="cIdx" class="flex items-center justify-end gap-1.5">
-                                    <span class="text-[10px] font-bold text-gray-600 whitespace-nowrap">1 {{c.name}} =</span>
-                                    <input v-model.number="c.rel" @input="recalcAllUnits(item)" type="number" min="1" class="w-14 text-center border border-amber-300 rounded px-1 py-0.5 text-xs font-bold text-amber-700 outline-none focus:ring-1 focus:ring-amber-500 bg-white">
-                                    <span class="text-[9px] font-bold text-gray-500 whitespace-nowrap w-12 text-left">{{c.prevName}}</span>
-                                </div>
-                            </div>
-                            <div v-else class="text-[10px] text-gray-400 italic text-center">Hàng lẻ</div>
+                        <td class="px-3 py-2 text-center border-l flex flex-col gap-1.5 h-full justify-center">
+                            <input v-if="modalMode === 'add'" v-model="item.nsx" type="date" class="border border-gray-300 rounded px-1 py-1 text-[10px] bg-white outline-none w-full">
+                            <span v-else class="text-[10px] text-gray-500 font-bold bg-gray-100 px-1 py-0.5 rounded">NSX: {{item.nsx || '--'}}</span>
+                            
+                            <input v-if="modalMode === 'add'" v-model="item.hsd" type="date" class="border border-gray-300 rounded px-1 py-1 text-[10px] bg-white outline-none w-full mt-1">
+                            <span v-else class="text-[10px] text-red-500 font-bold bg-red-50 px-1 py-0.5 rounded border border-red-100">HSD: {{item.hsd || '--'}}</span>
                         </td>
 
                         <td v-if="modalMode === 'add'" class="px-3 py-2 text-center bg-blue-50/20 border-l">
-                            <select v-model="item.selectedUnit" class="w-full border border-blue-200 rounded px-1 py-1.5 text-xs font-bold text-blue-800 bg-white outline-none cursor-pointer"><option v-for="u in item.units" :key="u.name" :value="u.name">{{ u.name }}</option></select>
-                        </td>
-
-                        <td v-if="modalMode === 'add'" class="px-3 py-2 text-center bg-blue-50/20">
-                            <input v-model.number="item.inputQty" type="number" min="1" class="w-full text-center border border-blue-300 rounded-lg px-1 py-1.5 text-base font-bold text-blue-700 outline-none shadow-inner bg-white">
+                            <div class="flex items-center gap-1">
+                                <input v-model.number="item.inputQty" type="number" min="1" class="w-16 text-center border border-blue-300 rounded px-1 py-1.5 text-sm font-bold text-blue-700 outline-none shadow-inner bg-white">
+                                <select v-model="item.selectedUnit" class="w-full border border-blue-200 rounded px-1 py-1.5 text-xs font-bold text-blue-800 bg-white outline-none cursor-pointer">
+                                    <option v-for="u in item.units" :key="u.name" :value="u.name">{{ u.name }}</option>
+                                </select>
+                            </div>
                         </td>
                       
-                        <td class="px-3 py-2 text-center border-l bg-emerald-50/20">
-                            <div class="text-[12px] font-bold text-emerald-800 bg-emerald-50 px-3 py-2 rounded border border-emerald-200 inline-block shadow-sm text-center">
-                                {{ autoFormatStockText(getItemTotalQty(item), item.units, item.baseUnit) }}
+                        <td class="px-3 py-2 border-l bg-emerald-50/20 text-center">
+                            <div v-if="modalMode === 'add'" class="text-[12px] font-bold text-emerald-800 bg-emerald-50 px-3 py-2 rounded border border-emerald-300 shadow-sm text-center inline-block">
+                                {{ getFullChainExplanation(item) }}
+                            </div>
+                            <div v-else class="text-[12px] font-bold text-emerald-800 bg-emerald-50 px-3 py-2 rounded border border-emerald-300 shadow-sm text-center inline-block">
+                                + {{ item.qty }} {{ item.baseUnit }}
                             </div>
                         </td>
 
@@ -384,17 +455,17 @@ onMounted(() => fetchData())
                             <span v-else class="font-bold text-gray-700">{{ formatCurrency(item.price) }}</span>
                         </td>
                         <td v-if="canViewPrice" class="px-3 py-2 text-right bg-indigo-50/20 font-bold text-indigo-700 border-l">{{ formatCurrency(getItemTotalQty(item) * (item.price || 0)) }}</td>
-                        <td v-if="modalMode === 'add'" class="px-3 py-2 text-center border-l"><button type="button" @click="removeItem(idx)" class="text-red-400 hover:text-red-600"><TrashIcon class="w-5 h-5 mx-auto"/></button></td>
+                        <td v-if="modalMode === 'add'" class="px-3 py-2 text-center border-l"><button type="button" @click="removeItem(idx)" class="text-red-400 hover:text-red-600 p-1 hover:bg-red-50 rounded"><TrashIcon class="w-5 h-5 mx-auto"/></button></td>
                     </tr>
                   </tbody>
                 </table>
               </div>
-              <div><label class="block text-xs font-bold mb-1">Ghi chú</label><textarea v-model="formData.note" :disabled="modalMode === 'view'" rows="2" class="w-full border rounded-lg px-3 py-2 text-sm bg-white"></textarea></div>
+              <div><label class="block text-xs font-bold mb-1">Ghi chú</label><textarea v-model="formData.note" :disabled="modalMode === 'view'" rows="2" class="w-full border rounded-lg px-3 py-2 text-sm bg-white outline-none focus:ring-1 focus:ring-primary-500"></textarea></div>
             </form>
           </div>
 
-          <div class="px-6 py-4 border-t flex justify-end gap-3 shrink-0 bg-white shadow-inner">
-            <button type="button" @click="closeModal" class="px-5 py-2 border rounded-lg text-sm font-semibold hover:bg-gray-50">{{ modalMode === 'view' ? 'Đóng lại' : 'Hủy bỏ' }}</button>
+          <div class="px-6 py-4 border-t flex justify-end gap-3 shrink-0 bg-gray-50">
+            <button type="button" @click="closeModal" class="px-5 py-2 border rounded-lg text-sm font-semibold hover:bg-gray-100 bg-white shadow-sm">{{ modalMode === 'view' ? 'Đóng lại' : 'Hủy bỏ' }}</button>
             <button v-if="modalMode === 'add'" type="submit" form="inboundForm" class="px-6 py-2.5 bg-primary-600 text-white rounded-lg text-sm font-bold hover:bg-primary-700 shadow-md">Lưu Phiếu Nhập</button>
           </div>
 

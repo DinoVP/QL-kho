@@ -99,7 +99,7 @@ namespace BE.Controllers
                     ReceiptDate = DateTime.TryParse(req.Date, out var d) ? d : DateTime.Now,
                     SupplierId = req.SupplierId,
                     WarehouseId = req.WarehouseId,
-                    Status = "pending",
+                    Status = "pending", // Vẫn giữ là pending ban đầu
                     Note = req.Note
                 };
                 _context.PurReceipts.Add(receipt);
@@ -122,6 +122,14 @@ namespace BE.Controllers
                     }
                 }
                 await _context.SaveChangesAsync();
+
+                // NẾU LÀ GIÁM ĐỐC TẠO -> DUYỆT LUÔN (Theo code Vue.js truyền status là approved)
+                if (req.Status == "approved")
+                {
+                    receipt.Status = "approved";
+                    await _context.SaveChangesAsync();
+                }
+
                 await transaction.CommitAsync();
 
                 return Ok(new { message = "Lập phiếu thành công!", code = receipt.Grncode });
@@ -134,7 +142,7 @@ namespace BE.Controllers
         }
 
         // ==========================================================
-        // 3. XÁC NHẬN NHẬP KHO
+        // 3. XÁC NHẬN NHẬP KHO VÀ 🚀 BẮT MẠCH GIÁ TỰ ĐỘNG
         // ==========================================================
         [HttpPut("{id}/complete")]
         public async Task<IActionResult> CompleteReceipt(int id)
@@ -148,17 +156,41 @@ namespace BE.Controllers
             {
                 int safeWhId = receipt.WarehouseId ?? 1;
 
+                // 1. GỘP CÁC SẢN PHẨM TRÙNG NHAU TRONG PHIẾU ĐỂ CỘNG TỒN KHO
                 var groupedItems = receipt.PurReceiptLines
                     .GroupBy(l => l.VariantId)
                     .Select(g => new {
                         VariantId = g.Key,
                         Nsx = g.FirstOrDefault(x => x.Nsx != null)?.Nsx,
                         Hsd = g.FirstOrDefault(x => x.Hsd != null)?.Hsd,
-                        TotalQty = g.Sum(l => l.ReceivedQty ?? 0)
+                        TotalQty = g.Sum(l => l.ReceivedQty ?? 0),
+                        LatestPrice = g.LastOrDefault()?.Price ?? 0 // Lấy giá của dòng cuối cùng làm mốc
                     }).ToList();
 
                 foreach (var item in groupedItems)
                 {
+                    // --- 🚀 CODE BẮT MẠCH BIẾN ĐỘNG GIÁ TỰ ĐỘNG ---
+                    var variant = await _context.ItmVariants.FindAsync(item.VariantId);
+                    if (variant != null && variant.BasePrice != item.LatestPrice)
+                    {
+                        // Ghi log Lịch sử giá
+                        var priceHistory = new ItmPriceHistory
+                        {
+                            VariantId = variant.VariantId,
+                            OldPrice = variant.BasePrice ?? 0,
+                            NewPrice = item.LatestPrice,
+                            EffectiveDate = DateTime.Now,
+                            UpdatedBy = "Auto (Warehouse)", // Hệ thống tự ghi nhận lúc nhập kho
+                            Source = $"Tự động từ Phiếu Nhập kho số: {receipt.Grncode}"
+                        };
+                        _context.ItmPriceHistories.Add(priceHistory);
+
+                        // Cập nhật giá mới cho sản phẩm
+                        variant.BasePrice = item.LatestPrice;
+                    }
+                    // --- KẾT THÚC BẮT MẠCH GIÁ ---
+
+                    // --- TIẾP TỤC CỘNG TỒN KHO NHƯ BÌNH THƯỜNG ---
                     var existingStock = await _context.WmsStockBalances.FirstOrDefaultAsync(s =>
                         s.VariantId == item.VariantId &&
                         s.LocationId == null &&
@@ -189,7 +221,7 @@ namespace BE.Controllers
                 receipt.Status = "completed";
                 await _context.SaveChangesAsync();
                 await transaction.CommitAsync();
-                return Ok(new { message = "Nhập hàng thành công! Hàng đã vào bãi tập kết." });
+                return Ok(new { message = "Nhập hàng thành công! Giá vốn đã được cập nhật tự động." });
             }
             catch (Exception ex)
             {

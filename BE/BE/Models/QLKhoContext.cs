@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using Microsoft.EntityFrameworkCore;
+using Tên_Project_Của_Sếp.Models; // Sếp nhớ giữ nguyên namespace gốc của sếp chỗ này nhé nếu có khác biệt
 
 namespace BE.Models;
 
@@ -58,11 +59,18 @@ public partial class QLKhoContext : DbContext
     public virtual DbSet<ItmCategory> ItmCategories { get; set; }
     public virtual DbSet<ItmImage> ItmImages { get; set; }
     public virtual DbSet<ItmPriceListDetail> ItmPriceListDetails { get; set; }
+
+    // ĐÃ BỔ SUNG BẢNG LỊCH SỬ GIÁ Ở ĐÂY
+    public virtual DbSet<ItmPriceHistory> ItmPriceHistories { get; set; }
+
     public virtual DbSet<ItmProduct> ItmProducts { get; set; }
     public virtual DbSet<ItmSerial> ItmSerials { get; set; }
     public virtual DbSet<ItmSubCategory> ItmSubCategories { get; set; }
-    public virtual DbSet<ItmUoMconversion> ItmUoMconversions { get; set; }
-    public virtual DbSet<ItmUoMgroup> ItmUoMgroups { get; set; }
+
+    // --- CÁC BẢNG QUY ĐỔI MỚI (Thay thế ItmUoMgroups/ItmUoMconversions) ---
+    public virtual DbSet<ItmUnit> ItmUnits { get; set; }
+    public virtual DbSet<ItmProductUnit> ItmProductUnits { get; set; }
+
     public virtual DbSet<ItmVariant> ItmVariants { get; set; }
     public virtual DbSet<ItmVariantAttribute> ItmVariantAttributes { get; set; }
     public virtual DbSet<LogDriver> LogDrivers { get; set; }
@@ -96,10 +104,7 @@ public partial class QLKhoContext : DbContext
     public virtual DbSet<SysModule> SysModules { get; set; }
     public virtual DbSet<SysRole> SysRoles { get; set; }
     public virtual DbSet<SysSetting> SysSettings { get; set; }
-
-    // --- ĐÃ THÊM BẢNG NHẬT KÝ UI VÀO ĐÂY ---
     public virtual DbSet<SysUiLog> SysUiLogs { get; set; }
-
     public virtual DbSet<SysUser> SysUsers { get; set; }
     public virtual DbSet<WmsAdjustment> WmsAdjustments { get; set; }
     public virtual DbSet<WmsAdjustmentLine> WmsAdjustmentLines { get; set; }
@@ -885,6 +890,29 @@ public partial class QLKhoContext : DbContext
                 .HasConstraintName("FK__ITM_Price__Varia__41EDCAC5");
         });
 
+        // ĐÃ CẤU HÌNH FLUENT API CHO BẢNG LỊCH SỬ GIÁ
+        modelBuilder.Entity<ItmPriceHistory>(entity =>
+        {
+            entity.HasKey(e => e.HistoryId).HasName("PK_ITM_PriceHistories");
+            entity.ToTable("ITM_PriceHistories");
+
+            entity.Property(e => e.HistoryId).HasColumnName("HistoryID");
+            entity.Property(e => e.VariantId).HasColumnName("VariantID");
+            entity.Property(e => e.OldPrice).HasColumnType("decimal(18, 2)");
+            entity.Property(e => e.NewPrice).HasColumnType("decimal(18, 2)");
+            entity.Property(e => e.EffectiveDate)
+                .HasDefaultValueSql("(getdate())")
+                .HasColumnType("datetime");
+            entity.Property(e => e.UpdatedBy).HasMaxLength(50);
+            entity.Property(e => e.Source).HasMaxLength(255);
+
+            entity.HasOne(d => d.Variant)
+                .WithMany() // Không cần tạo ICollection trong Variant cho đỡ rối
+                .HasForeignKey(d => d.VariantId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("FK_ITM_PriceHistories_Variants");
+        });
+
         modelBuilder.Entity<ItmProduct>(entity =>
         {
             entity.HasKey(e => e.ProductId).HasName("PK__ITM_Prod__B40CC6ED666D63E6");
@@ -902,7 +930,6 @@ public partial class QLKhoContext : DbContext
                 .HasColumnName("SKU");
             entity.Property(e => e.SubCatId).HasColumnName("SubCatID");
             entity.Property(e => e.TaxId).HasColumnName("TaxID");
-            entity.Property(e => e.UoMgroupId).HasColumnName("UoMGroupID");
 
             entity.HasOne(d => d.Brand).WithMany(p => p.ItmProducts)
                 .HasForeignKey(d => d.BrandId)
@@ -915,29 +942,61 @@ public partial class QLKhoContext : DbContext
             entity.HasOne(d => d.Tax).WithMany(p => p.ItmProducts)
                 .HasForeignKey(d => d.TaxId)
                 .HasConstraintName("FK__ITM_Produ__TaxID__339FAB6E");
-
-            entity.HasOne(d => d.UoMgroup).WithMany(p => p.ItmProducts)
-                .HasForeignKey(d => d.UoMgroupId)
-                .HasConstraintName("FK__ITM_Produ__UoMGr__32AB8735");
         });
 
+        // --- ĐÃ THÊM LẠI CẤU HÌNH CHO 2 BẢNG QUY ĐỔI MỚI (Units & ProductUnits) ---
+        modelBuilder.Entity<ItmUnit>(entity =>
+        {
+            entity.HasKey(e => e.UnitId).HasName("PK_ITM_Units");
+            entity.ToTable("ITM_Units");
+
+            entity.Property(e => e.UnitId).HasColumnName("UnitID");
+            entity.HasIndex(e => e.UnitCode, "UQ_ITM_Units_UnitCode").IsUnique();
+            entity.Property(e => e.UnitCode).HasMaxLength(50).IsUnicode(false);
+            entity.Property(e => e.UnitName).HasMaxLength(100);
+        });
+
+        modelBuilder.Entity<ItmProductUnit>(entity =>
+        {
+            entity.HasKey(e => e.ConversionId).HasName("PK_ITM_ProductUnits");
+            entity.ToTable("ITM_ProductUnits");
+
+            entity.Property(e => e.ConversionId).HasColumnName("ConversionID");
+            entity.Property(e => e.ProductId).HasColumnName("ProductID");
+            entity.Property(e => e.FromUnitId).HasColumnName("FromUnitID");
+            entity.Property(e => e.ToUnitId).HasColumnName("ToUnitID");
+            entity.Property(e => e.FromQty).HasColumnType("decimal(18, 4)");
+            entity.Property(e => e.ToQty).HasColumnType("decimal(18, 4)");
+
+            entity.HasOne(d => d.Product)
+                .WithMany(p => p.ItmProductUnits)
+                .HasForeignKey(d => d.ProductId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("FK_ITM_ProductUnits_Product");
+
+            entity.HasOne(d => d.FromUnit)
+                .WithMany(p => p.FromProductUnits)
+                .HasForeignKey(d => d.FromUnitId)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_ITM_ProductUnits_FromUnit");
+
+            entity.HasOne(d => d.ToUnit)
+                .WithMany(p => p.ToProductUnits)
+                .HasForeignKey(d => d.ToUnitId)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_ITM_ProductUnits_ToUnit");
+        });
+
+        // --- ĐÃ KHÔI PHỤC LẠI CHO ITMSERIAL VÀ ITMSUBCATEGORY MÀ LÚC NÃY LỠ XÓA ---
         modelBuilder.Entity<ItmSerial>(entity =>
         {
             entity.HasKey(e => e.SerialId).HasName("PK__ITM_Seri__5E5B3EC4B26D29D0");
-
             entity.ToTable("ITM_Serials");
-
             entity.HasIndex(e => e.SerialNo, "UQ__ITM_Seri__5E5A535E27403A6B").IsUnique();
-
             entity.Property(e => e.SerialId).HasColumnName("SerialID");
-            entity.Property(e => e.SerialNo)
-                .HasMaxLength(100)
-                .IsUnicode(false);
-            entity.Property(e => e.Status)
-                .HasMaxLength(20)
-                .IsUnicode(false);
+            entity.Property(e => e.SerialNo).HasMaxLength(100).IsUnicode(false);
+            entity.Property(e => e.Status).HasMaxLength(20).IsUnicode(false);
             entity.Property(e => e.VariantId).HasColumnName("VariantID");
-
             entity.HasOne(d => d.Variant).WithMany(p => p.ItmSerials)
                 .HasForeignKey(d => d.VariantId)
                 .HasConstraintName("FK__ITM_Seria__Varia__498EEC8D");
@@ -946,44 +1005,15 @@ public partial class QLKhoContext : DbContext
         modelBuilder.Entity<ItmSubCategory>(entity =>
         {
             entity.HasKey(e => e.SubCatId).HasName("PK__ITM_SubC__3963797575A02B0A");
-
             entity.ToTable("ITM_SubCategories");
-
             entity.Property(e => e.SubCatId).HasColumnName("SubCatID");
             entity.Property(e => e.CategoryId).HasColumnName("CategoryID");
             entity.Property(e => e.SubCatName).HasMaxLength(200);
-
             entity.HasOne(d => d.Category).WithMany(p => p.ItmSubCategories)
                 .HasForeignKey(d => d.CategoryId)
                 .HasConstraintName("FK__ITM_SubCa__Categ__25518C17");
         });
-
-        modelBuilder.Entity<ItmUoMconversion>(entity =>
-        {
-            entity.HasKey(e => e.ConvId).HasName("PK__ITM_UoMC__F3B6120B96F06137");
-
-            entity.ToTable("ITM_UoMConversions");
-
-            entity.Property(e => e.ConvId).HasColumnName("ConvID");
-            entity.Property(e => e.AltUoM).HasMaxLength(50);
-            entity.Property(e => e.ConvRate).HasColumnType("decimal(18, 4)");
-            entity.Property(e => e.UoMgroupId).HasColumnName("UoMGroupID");
-
-            entity.HasOne(d => d.UoMgroup).WithMany(p => p.ItmUoMconversions)
-                .HasForeignKey(d => d.UoMgroupId)
-                .HasConstraintName("FK__ITM_UoMCo__UoMGr__2CF2ADDF");
-        });
-
-        modelBuilder.Entity<ItmUoMgroup>(entity =>
-        {
-            entity.HasKey(e => e.UoMgroupId).HasName("PK__ITM_UoMG__E5F8A20C261AF6A3");
-
-            entity.ToTable("ITM_UoMGroups");
-
-            entity.Property(e => e.UoMgroupId).HasColumnName("UoMGroupID");
-            entity.Property(e => e.BaseUoM).HasMaxLength(50);
-            entity.Property(e => e.GroupName).HasMaxLength(100);
-        });
+        // -------------------------------------------------------------------------
 
         modelBuilder.Entity<ItmVariant>(entity =>
         {
@@ -1728,7 +1758,6 @@ public partial class QLKhoContext : DbContext
                 .HasConstraintName("FK__SYS_Setti__Updat__6EF57B66");
         });
 
-        // --- CẤU HÌNH CHO BẢNG MỚI TẠO (SysUiLog) ---
         modelBuilder.Entity<SysUiLog>(entity =>
         {
             entity.HasKey(e => e.Id).HasName("PK_SYS_UiLogs");
@@ -1750,9 +1779,8 @@ public partial class QLKhoContext : DbContext
                 .HasDefaultValueSql("(getdate())")
                 .HasColumnType("datetime");
 
-            // Ràng buộc khóa ngoại với bảng SysUsers
             entity.HasOne(d => d.SysUser)
-                .WithMany() // Giả định SysUser không cần 1 list các UiLog dội ngược lại
+                .WithMany()
                 .HasForeignKey(d => d.UserId)
                 .HasConstraintName("FK__SYS_UiLog__UserID");
         });

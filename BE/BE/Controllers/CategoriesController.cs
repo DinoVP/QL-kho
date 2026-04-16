@@ -4,6 +4,7 @@ using BE.Models;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
+using Tên_Project_Của_Sếp.Models;
 
 namespace BE.Controllers
 {
@@ -49,7 +50,7 @@ namespace BE.Controllers
             }
             catch (Exception ex)
             {
-                Console.WriteLine("==== LỖI GHI LOG: " + ex.InnerException?.Message ?? ex.Message);
+                Console.WriteLine("==== LỖI GHI LOG: " + (ex.InnerException?.Message ?? ex.Message));
             }
         }
         // =========================================================================
@@ -63,8 +64,8 @@ namespace BE.Controllers
                 Code = c.CatCode,
                 Name = c.CatName,
                 Type = "Nhóm sản phẩm",
-                Desc = "", // DB không có cột mô tả nên trả về rỗng
-                Status = "active" // DB không có cột trạng thái nên fix cứng
+                Desc = "",
+                Status = "active"
             }).ToListAsync();
 
             var brands = await _context.ItmBrands.Select(b => new CategoryDto
@@ -77,13 +78,14 @@ namespace BE.Controllers
                 Status = "active"
             }).ToListAsync();
 
-            var uoms = await _context.ItmUoMgroups.Select(u => new CategoryDto
+            // ĐÃ SỬA: Đổi từ ItmUoMgroups sang ItmUnits
+            var uoms = await _context.ItmUnits.Select(u => new CategoryDto
             {
-                Id = "UOM_" + u.UoMgroupId,
-                Code = "DVT",
-                Name = u.GroupName,
+                Id = "UNI_" + u.UnitId, // Đổi tiền tố thành UNI_ cho chuẩn
+                Code = u.UnitCode,
+                Name = u.UnitName,
                 Type = "Đơn vị tính",
-                Desc = u.BaseUoM, // Riêng UOM thì lấy BaseUoM làm mô tả
+                Desc = "ĐVT Linh hoạt", // ItmUnits chỉ có Code và Name, không có BaseUoM nữa
                 Status = "active"
             }).ToListAsync();
 
@@ -114,11 +116,16 @@ namespace BE.Controllers
                 }
                 else if (request.Type == "Đơn vị tính")
                 {
-                    // Lấy ô Description trên FE làm Đơn vị cơ sở (BaseUoM)
-                    var uom = new ItmUoMgroup { GroupName = request.Name, BaseUoM = request.Desc ?? "Cái" };
-                    _context.ItmUoMgroups.Add(uom);
+                    // ĐÃ SỬA: Tạo mới vào bảng ItmUnits
+                    if (string.IsNullOrWhiteSpace(autoCode))
+                    {
+                        autoCode = "UNI_" + DateTime.Now.Ticks.ToString().Substring(8, 6);
+                    }
+
+                    var unit = new ItmUnit { UnitCode = autoCode, UnitName = request.Name };
+                    _context.ItmUnits.Add(unit);
                     await _context.SaveChangesAsync();
-                    newId = "UOM_" + uom.UoMgroupId;
+                    newId = "UNI_" + unit.UnitId;
                 }
                 else // Nhóm sản phẩm
                 {
@@ -128,7 +135,6 @@ namespace BE.Controllers
                         autoCode = "CAT" + (count + 1).ToString("D3");
                     }
 
-                    // Đã gỡ thuộc tính Description vì DB không có
                     var cat = new ItmCategory { CatCode = autoCode, CatName = request.Name };
                     _context.ItmCategories.Add(cat);
                     await _context.SaveChangesAsync();
@@ -159,13 +165,14 @@ namespace BE.Controllers
                     if (!string.IsNullOrWhiteSpace(request.Code)) brand.BrandCode = request.Code;
                     brand.BrandName = request.Name;
                 }
-                else if (id.StartsWith("UOM_"))
+                // ĐÃ SỬA: Bắt tiền tố UNI_ thay vì UOM_
+                else if (id.StartsWith("UNI_"))
                 {
                     int realId = int.Parse(id.Substring(4));
-                    var uom = await _context.ItmUoMgroups.FindAsync(realId);
-                    if (uom == null) return NotFound();
-                    uom.GroupName = request.Name;
-                    uom.BaseUoM = request.Desc ?? "Cái"; // Cập nhật BaseUoM
+                    var unit = await _context.ItmUnits.FindAsync(realId);
+                    if (unit == null) return NotFound();
+                    if (!string.IsNullOrWhiteSpace(request.Code)) unit.UnitCode = request.Code;
+                    unit.UnitName = request.Name;
                 }
                 else // CAT_
                 {
@@ -174,7 +181,6 @@ namespace BE.Controllers
                     if (cat == null) return NotFound();
                     if (!string.IsNullOrWhiteSpace(request.Code)) cat.CatCode = request.Code;
                     cat.CatName = request.Name;
-                    // Bỏ cập nhật Description vì DB không có
                 }
 
                 await _context.SaveChangesAsync();
@@ -205,13 +211,14 @@ namespace BE.Controllers
                     catName = brand.BrandName;
                     _context.ItmBrands.Remove(brand);
                 }
-                else if (id.StartsWith("UOM_"))
+                // ĐÃ SỬA: Xóa từ bảng ItmUnits
+                else if (id.StartsWith("UNI_"))
                 {
                     int realId = int.Parse(id.Substring(4));
-                    var uom = await _context.ItmUoMgroups.FindAsync(realId);
-                    if (uom == null) return NotFound();
-                    catName = uom.GroupName;
-                    _context.ItmUoMgroups.Remove(uom);
+                    var unit = await _context.ItmUnits.FindAsync(realId);
+                    if (unit == null) return NotFound();
+                    catName = unit.UnitName;
+                    _context.ItmUnits.Remove(unit);
                 }
                 else // CAT_
                 {

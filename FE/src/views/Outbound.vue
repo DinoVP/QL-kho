@@ -37,9 +37,6 @@ const isLoading = ref(false)
 const getToday = () => new Date().toISOString().split('T')[0]
 const formatCurrency = (val) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(val || 0)
 
-// =========================================================================
-// HÀM NÀY BỊ THIẾU Ở BẢN TRƯỚC, GÂY LỖI TRẮNG MÀN HÌNH - NAY ĐÃ ĐƯỢC FIX CỨNG!
-// =========================================================================
 const getCustomerName = (id) => {
   const cus = customers.value.find(c => c.partnerId === id || c.id === id);
   return cus ? (cus.partnerName || cus.name) : `Khách hàng (ID: ${id})`;
@@ -133,7 +130,10 @@ const fetchData = async () => {
             sku: prod.sku || prod.Sku || 'N/A', 
             name: prod.name || prod.Name || 'Lỗi', 
             unit: prod.unit || prod.Unit || 'Cái', 
-            price: prod.price || prod.Price || 0, 
+            
+            // ĐÃ FIX: Hứng chuẩn ImportPrice để không bị lỗi hiển thị 0đ
+            price: prod.importPrice || prod.ImportPrice || prod.price || prod.Price || 0, 
+            
             units: getUnitChain(prod), 
             locationId: s.locationId, 
             locationCode: loc.code || loc.Code || 'Lỗi vị trí' 
@@ -208,7 +208,10 @@ const openModal = (mode, receipt = null) => {
           inputQty: bestQty, 
           qty: totalQty, 
           maxQty: (stock ? stock.qtyAvailable : 0) + totalQty, 
-          price: i.price || i.Price || prod.price || 0, 
+          
+          // ĐÃ FIX: Ưu tiên lấy giá lưu trong Phiếu, nếu không có mới lấy giá từ danh mục SP
+          price: i.price || i.Price || prod.importPrice || prod.ImportPrice || prod.price || 0, 
+          
           locationId: i.locationId || i.LocationId, 
           locationCode: loc.code || loc.Code || 'Lỗi', 
           nsx: nsxStr, 
@@ -301,7 +304,6 @@ const totalPrice = computed(() => {
     return formData.value.items.reduce((sum, i) => sum + (modalMode.value === 'view' ? (i.qty * i.price) : (getItemTotalQty(i) * i.price)), 0)
 })
 
-// === LOGIC TẠO PHIẾU ĐƯỢC CHUẨN HÓA LẠI ===
 const handleSubmit = async () => {
   if (formData.value.items.length === 0) return alert('Chưa chọn mặt hàng nào!')
   if (!formData.value.customerId) return alert('Chưa chọn Khách hàng!')

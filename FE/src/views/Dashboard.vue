@@ -13,7 +13,7 @@ const INBOUND_API = 'https://localhost:7139/api/Inbound'
 const OUTBOUND_API = 'https://localhost:7139/api/Outbound'
 const PROD_API = 'https://localhost:7139/api/Products'
 const BRANCH_API = 'https://localhost:7139/api/Branches'
-const LOC_API = 'https://localhost:7139/api/Locations' // THÊM API VỊ TRÍ ĐỂ TÍNH REAL DATA
+const LOC_API = 'https://localhost:7139/api/Locations'
 
 const getAuthHeaders = () => ({ 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (localStorage.getItem('authToken') || '') })
 
@@ -66,9 +66,11 @@ const fetchData = async () => {
         }
 
         const [stockRes, inbRes, outRes, prodRes, locRes] = await Promise.all([
-            fetch(STOCK_API, { headers }), fetch(INBOUND_API, { headers }), 
-            fetch(OUTBOUND_API, { headers }), fetch(PROD_API, { headers }),
-            fetch(LOC_API, { headers })
+            fetch(STOCK_API, { headers }).catch(()=>({ok:false})), 
+            fetch(INBOUND_API, { headers }).catch(()=>({ok:false})), 
+            fetch(OUTBOUND_API, { headers }).catch(()=>({ok:false})), 
+            fetch(PROD_API, { headers }).catch(()=>({ok:false})),
+            fetch(LOC_API, { headers }).catch(()=>({ok:false}))
         ])
         
         if (prodRes.ok) rawData.value.products = await prodRes.json()
@@ -91,7 +93,7 @@ const validWarehouseIds = computed(() => {
     return validWhs.map(w => w.id)
 })
 
-const formatCurrency = (val) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(val)
+const formatCurrency = (val) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(val || 0)
 
 const dashboardStats = computed(() => {
     const whIds = validWarehouseIds.value;
@@ -105,7 +107,8 @@ const dashboardStats = computed(() => {
 
     myStocks.forEach(s => {
         const prod = rawData.value.products.find(p => p.id === (s.variantId || s.VariantId)) || {}
-        const price = prod.price || prod.Price || 0
+        // Dùng importPrice cho chuẩn với module Mua Hàng
+        const price = prod.importPrice || prod.ImportPrice || prod.price || prod.Price || 0
         totalValue += (s.qty || 0) * price
         totalItems += (s.qty || 0)
 
@@ -132,7 +135,7 @@ const dashboardStats = computed(() => {
     return { totalValue: formatCurrency(totalValue), totalItems, inboundCount: inThisMonth, outboundCount: outThisMonth, pendingOrders, activeAlerts: alertCount }
 })
 
-// === BIỂU ĐỒ CỘT (THẬT) ===
+// === BIỂU ĐỒ CỘT ===
 const last6Months = computed(() => {
     const months = []
     for(let i=5; i>=0; i--) {
@@ -162,7 +165,7 @@ const maxChartValue = computed(() => {
     return Math.max(maxIn, maxOut, 10) 
 })
 
-// === BIỂU ĐỒ TRÒN (THẬT TỪ BẢNG ITM_PRODUCTS VÀ WMS_STOCKBALANCES) ===
+// === BIỂU ĐỒ TRÒN ===
 const categoryData = computed(() => {
     const whIds = validWarehouseIds.value;
     const myStocks = rawData.value.stocks.filter(s => whIds.includes(parseInt(s.warehouseId)));
@@ -192,23 +195,21 @@ const categoryData = computed(() => {
 })
 
 const pieGradient = computed(() => {
-    if (categoryData.value.length === 0) return 'conic-gradient(#e5e7eb 0% 100%)';
+    if (categoryData.value.length === 0) return 'conic-gradient(#f3f4f6 0% 100%)';
     const stops = categoryData.value.map(d => `${d.color} ${d.startAngle}% ${d.endAngle}%`).join(', ');
     return `conic-gradient(${stops})`;
 })
 
-// === THANH TIẾN TRÌNH: TỈ LỆ LẤP ĐẦY KHO (THẬT TỪ BẢNG WMS_LOCATIONS) ===
+// === THANH TIẾN TRÌNH LẤP ĐẦY KHO ===
 const capacityData = computed(() => {
     const whIds = validWarehouseIds.value;
     
-    // Đếm tổng số vị trí kệ (Locations) thuộc các kho đang xem
     const validLocs = rawData.value.locations.filter(l => {
-        const wId = l.warehouseId || l.WarehouseId || 1; // Giả định nếu API trả về warehouseId
+        const wId = l.warehouseId || l.WarehouseId || 1; 
         return whIds.includes(parseInt(wId));
     });
     const totalLocations = validLocs.length;
 
-    // Đếm số vị trí kệ ĐANG ĐƯỢC SỬ DỤNG
     const myStocks = rawData.value.stocks.filter(s => s.qty > 0 && s.locationId && whIds.includes(parseInt(s.warehouseId)));
     const usedLocationIds = new Set(myStocks.map(s => s.locationId));
     const usedLocations = usedLocationIds.size;
@@ -216,14 +217,15 @@ const capacityData = computed(() => {
     let percentage = 0;
     if (totalLocations > 0) percentage = Math.min((usedLocations / totalLocations) * 100, 100);
     
-    let colorClass = 'bg-emerald-500';
-    if (percentage > 70) colorClass = 'bg-amber-500';
-    if (percentage > 90) colorClass = 'bg-red-500';
+    let colorClass = 'from-emerald-400 to-emerald-500';
+    let textClass = 'text-emerald-800';
+    if (percentage > 70) { colorClass = 'from-amber-400 to-amber-500'; textClass = 'text-amber-900'; }
+    if (percentage > 90) { colorClass = 'from-red-500 to-red-600'; textClass = 'text-white'; }
 
-    return { current: usedLocations, max: totalLocations, percentage: percentage.toFixed(1), colorClass };
+    return { current: usedLocations, max: totalLocations, percentage: percentage.toFixed(1), colorClass, textClass };
 })
 
-// === TOP SẢN PHẨM XUẤT KHO (THẬT TỪ BẢNG SAL_DELIVERYLINES / OUTBOUND) ===
+// === TOP SẢN PHẨM XUẤT KHO ===
 const topOutboundProducts = computed(() => {
     const whIds = validWarehouseIds.value;
     const myOutbounds = rawData.value.outbounds.filter(o => o.status === 'completed' && whIds.includes(parseInt(o.warehouseId)));
@@ -251,151 +253,227 @@ onMounted(() => fetchData())
 </script>
 
 <template>
-  <div class="space-y-6 animate-fade-in pb-10 px-0 md:px-1">
+  <div class="space-y-6 animate-fade-in pb-10 px-0 md:px-2 max-w-7xl mx-auto">
     
-    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-4 md:p-5 rounded-2xl border border-gray-100 shadow-sm">
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white/70 backdrop-blur-xl p-5 md:p-6 rounded-3xl border border-white shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)]">
       <div>
-        <h2 class="text-xl md:text-2xl font-bold text-gray-800 flex items-center gap-2">
+        <h2 class="text-2xl md:text-3xl font-extrabold text-gray-900 tracking-tight flex items-center gap-3">
             Tổng quan Hệ thống
-            <span v-if="viewScope === 'ALL'" class="bg-primary-100 text-primary-800 text-[10px] px-2 py-0.5 rounded border border-primary-200 uppercase font-black tracking-wider">Cấp: Toàn công ty</span>
-            <span v-else-if="viewScope === 'BRANCH'" class="bg-blue-100 text-blue-800 text-[10px] px-2 py-0.5 rounded border border-blue-200 uppercase font-black tracking-wider">Cấp: Chi Nhánh</span>
-            <span v-else class="bg-emerald-100 text-emerald-800 text-[10px] px-2 py-0.5 rounded border border-emerald-200 uppercase font-black tracking-wider">Cấp: Nội bộ Kho {{ myWarehouseId }}</span>
+            <span v-if="viewScope === 'ALL'" class="bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-[10px] px-2.5 py-1 rounded-md uppercase font-black tracking-widest shadow-md">Toàn công ty</span>
+            <span v-else-if="viewScope === 'BRANCH'" class="bg-gradient-to-r from-teal-500 to-emerald-500 text-white text-[10px] px-2.5 py-1 rounded-md uppercase font-black tracking-widest shadow-md">Chi Nhánh</span>
+            <span v-else class="bg-gradient-to-r from-purple-500 to-pink-500 text-white text-[10px] px-2.5 py-1 rounded-md uppercase font-black tracking-widest shadow-md">Kho Số {{ myWarehouseId }}</span>
         </h2>
-        <p class="text-xs md:text-sm text-gray-500 mt-1">Dữ liệu thời gian thực đồng bộ từ Database</p>
+        <p class="text-sm text-gray-500 mt-1 font-medium">Báo cáo trực quan dữ liệu thời gian thực</p>
       </div>
 
-      <div v-if="viewScope === 'ALL' || viewScope === 'BRANCH'" class="flex flex-col sm:flex-row gap-2">
-        <select v-if="viewScope === 'ALL'" v-model="selectedBranch" @change="onBranchChange" class="border border-gray-200 rounded-lg text-sm px-3 py-2 outline-none focus:ring-1 focus:ring-primary-500 bg-gray-50 font-semibold cursor-pointer">
-            <option value="">Tất cả Chi Nhánh</option>
-            <option v-for="b in allBranches" :key="b.id||b.Id" :value="b.id||b.Id">{{ b.name||b.Name }}</option>
-        </select>
-        <select v-model="selectedWarehouse" class="border border-gray-200 rounded-lg text-sm px-3 py-2 outline-none focus:ring-1 focus:ring-primary-500 bg-gray-50 font-semibold cursor-pointer">
-            <option value="">Tất cả các Kho</option>
-            <option v-for="wh in allWarehouses.filter(w => !selectedBranch || w.branchId == selectedBranch)" :key="wh.id" :value="wh.id">{{ wh.name }}</option>
-        </select>
+      <div v-if="viewScope === 'ALL' || viewScope === 'BRANCH'" class="flex flex-col sm:flex-row gap-3">
+        <div v-if="viewScope === 'ALL'" class="relative">
+            <select v-model="selectedBranch" @change="onBranchChange" class="appearance-none w-full border border-gray-200 rounded-xl pl-4 pr-10 py-2.5 outline-none focus:ring-2 focus:ring-blue-500 bg-white font-semibold text-gray-700 shadow-sm cursor-pointer transition-all hover:border-blue-300">
+                <option value="">🏠 Tất cả Chi Nhánh</option>
+                <option v-for="b in allBranches" :key="b.id||b.Id" :value="b.id||b.Id">{{ b.name||b.Name }}</option>
+            </select>
+            <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-gray-500"><svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg></div>
+        </div>
+        
+        <div class="relative">
+            <select v-model="selectedWarehouse" class="appearance-none w-full border border-gray-200 rounded-xl pl-4 pr-10 py-2.5 outline-none focus:ring-2 focus:ring-blue-500 bg-white font-semibold text-gray-700 shadow-sm cursor-pointer transition-all hover:border-blue-300">
+                <option value="">📦 Tất cả các Kho</option>
+                <option v-for="wh in allWarehouses.filter(w => !selectedBranch || w.branchId == selectedBranch)" :key="wh.id" :value="wh.id">{{ wh.name }}</option>
+            </select>
+            <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-gray-500"><svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg></div>
+        </div>
       </div>
     </div>
 
-    <div v-if="isLoading" class="text-center py-10"><span class="text-gray-500 font-bold">Đang tải dữ liệu báo cáo...</span></div>
+    <div v-if="isLoading" class="flex flex-col items-center justify-center py-20 opacity-60">
+        <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
+        <span class="text-gray-500 font-bold tracking-widest uppercase text-sm">Đang tải khối dữ liệu...</span>
+    </div>
     
     <template v-else>
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
-            <div class="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex flex-col relative overflow-hidden group hover:shadow-md transition-shadow">
-                <div class="absolute -right-4 -top-4 w-16 h-16 bg-blue-50 rounded-full group-hover:scale-150 transition-transform duration-500"></div>
-                <div class="flex items-center justify-between mb-4 relative z-10"><h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider">Tổng Giá Trị Tồn</h3><CurrencyDollarIcon class="w-6 h-6 text-blue-500" /></div>
-                <p class="text-2xl font-extrabold text-gray-800 relative z-10 truncate" :title="dashboardStats.totalValue">{{ dashboardStats.totalValue }}</p>
-                <p class="text-xs font-medium text-blue-600 mt-2 relative z-10 flex items-center gap-1">Đang chứa {{ dashboardStats.totalItems }} đơn vị hàng</p>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 md:gap-6">
+            <div class="relative bg-white p-6 rounded-3xl border border-gray-100 shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_8px_30px_rgb(59,130,246,0.12)] transition-all duration-300 overflow-hidden group">
+                <div class="absolute -right-8 -top-8 w-32 h-32 bg-gradient-to-br from-blue-50 to-blue-100 rounded-full opacity-50 group-hover:scale-[1.5] transition-transform duration-700 ease-out"></div>
+                <div class="relative z-10 flex items-center justify-between mb-4">
+                    <div class="w-12 h-12 bg-gradient-to-br from-blue-500 to-indigo-600 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/30">
+                        <CurrencyDollarIcon class="w-6 h-6" />
+                    </div>
+                </div>
+                <div class="relative z-10">
+                    <h3 class="text-xs font-bold text-gray-400 mb-1 uppercase tracking-widest">Tổng Giá Trị Tồn</h3>
+                    <p class="text-2xl xl:text-3xl font-black text-gray-900 tracking-tight truncate" :title="dashboardStats.totalValue">{{ dashboardStats.totalValue }}</p>
+                </div>
+                <div class="relative z-10 mt-5 border-t border-gray-100 pt-4">
+                    <p class="text-xs font-semibold text-gray-500 flex items-center gap-1.5">Đang quản lý <strong class="text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md">{{ dashboardStats.totalItems }}</strong> sản phẩm</p>
+                </div>
             </div>
             
-            <div class="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex flex-col relative overflow-hidden group hover:shadow-md transition-shadow">
-                <div class="absolute -right-4 -top-4 w-16 h-16 bg-emerald-50 rounded-full group-hover:scale-150 transition-transform duration-500"></div>
-                <div class="flex items-center justify-between mb-4 relative z-10"><h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider">Nhập Kho (Tháng này)</h3><DocumentArrowDownIcon class="w-6 h-6 text-emerald-500" /></div>
-                <p class="text-3xl font-extrabold text-gray-800 relative z-10">{{ dashboardStats.inboundCount }}</p>
-                <p class="text-xs font-medium text-emerald-600 mt-2 relative z-10">Phiếu nhập đã hoàn thành</p>
+            <div class="relative bg-white p-6 rounded-3xl border border-gray-100 shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_8px_30px_rgb(16,185,129,0.12)] transition-all duration-300 overflow-hidden group">
+                <div class="absolute -right-8 -top-8 w-32 h-32 bg-gradient-to-br from-emerald-50 to-emerald-100 rounded-full opacity-50 group-hover:scale-[1.5] transition-transform duration-700 ease-out"></div>
+                <div class="relative z-10 flex items-center justify-between mb-4">
+                    <div class="w-12 h-12 bg-gradient-to-br from-emerald-400 to-teal-500 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-emerald-500/30">
+                        <DocumentArrowDownIcon class="w-6 h-6" />
+                    </div>
+                </div>
+                <div class="relative z-10">
+                    <h3 class="text-xs font-bold text-gray-400 mb-1 uppercase tracking-widest">Nhập Kho (Tháng)</h3>
+                    <p class="text-3xl xl:text-4xl font-black text-gray-900 tracking-tight">{{ dashboardStats.inboundCount }} <span class="text-sm font-semibold text-gray-400">Phiếu</span></p>
+                </div>
+                <div class="relative z-10 mt-5 border-t border-gray-100 pt-4 flex justify-between items-center">
+                    <p class="text-xs font-semibold text-gray-500">Giao dịch đã hoàn thành</p>
+                    <span class="flex h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                </div>
             </div>
             
-            <div class="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex flex-col relative overflow-hidden group hover:shadow-md transition-shadow">
-                <div class="absolute -right-4 -top-4 w-16 h-16 bg-amber-50 rounded-full group-hover:scale-150 transition-transform duration-500"></div>
-                <div class="flex items-center justify-between mb-4 relative z-10"><h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider">Xuất Kho (Tháng này)</h3><DocumentArrowUpIcon class="w-6 h-6 text-amber-500" /></div>
-                <p class="text-3xl font-extrabold text-gray-800 relative z-10">{{ dashboardStats.outboundCount }}</p>
-                <p class="text-xs font-medium text-amber-600 mt-2 relative z-10 flex items-center gap-1">{{ dashboardStats.pendingOrders }} đơn đang chờ xuất kho</p>
+            <div class="relative bg-white p-6 rounded-3xl border border-gray-100 shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_8px_30px_rgb(245,158,11,0.12)] transition-all duration-300 overflow-hidden group">
+                <div class="absolute -right-8 -top-8 w-32 h-32 bg-gradient-to-br from-amber-50 to-amber-100 rounded-full opacity-50 group-hover:scale-[1.5] transition-transform duration-700 ease-out"></div>
+                <div class="relative z-10 flex items-center justify-between mb-4">
+                    <div class="w-12 h-12 bg-gradient-to-br from-amber-400 to-orange-500 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-amber-500/30">
+                        <DocumentArrowUpIcon class="w-6 h-6" />
+                    </div>
+                </div>
+                <div class="relative z-10">
+                    <h3 class="text-xs font-bold text-gray-400 mb-1 uppercase tracking-widest">Xuất Kho (Tháng)</h3>
+                    <p class="text-3xl xl:text-4xl font-black text-gray-900 tracking-tight">{{ dashboardStats.outboundCount }} <span class="text-sm font-semibold text-gray-400">Phiếu</span></p>
+                </div>
+                <div class="relative z-10 mt-5 border-t border-gray-100 pt-4">
+                    <p class="text-xs font-semibold text-gray-500 flex items-center gap-1.5"><strong class="text-amber-600 bg-amber-50 px-2 py-0.5 rounded-md">{{ dashboardStats.pendingOrders }}</strong> đơn đang chờ xuất</p>
+                </div>
             </div>
             
-            <div class="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex flex-col relative overflow-hidden group hover:shadow-md transition-shadow">
-                <div class="absolute -right-4 -top-4 w-16 h-16 bg-red-50 rounded-full group-hover:scale-150 transition-transform duration-500"></div>
-                <div class="flex items-center justify-between mb-4 relative z-10"><h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider">Cảnh báo Tồn Kho</h3><ExclamationCircleIcon class="w-6 h-6 text-red-500" /></div>
-                <p class="text-3xl font-extrabold text-red-600 relative z-10">{{ dashboardStats.activeAlerts }}</p>
-                <p class="text-xs font-medium text-red-500 mt-2 relative z-10 animate-pulse">Sản phẩm Cạn kho / Hết hạn</p>
+            <div class="relative bg-white p-6 rounded-3xl border border-gray-100 shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_8px_30px_rgb(239,68,68,0.12)] transition-all duration-300 overflow-hidden group">
+                <div class="absolute -right-8 -top-8 w-32 h-32 bg-gradient-to-br from-red-50 to-red-100 rounded-full opacity-50 group-hover:scale-[1.5] transition-transform duration-700 ease-out"></div>
+                <div class="relative z-10 flex items-center justify-between mb-4">
+                    <div class="w-12 h-12 bg-gradient-to-br from-red-500 to-rose-500 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-red-500/30">
+                        <ExclamationCircleIcon class="w-6 h-6" />
+                    </div>
+                </div>
+                <div class="relative z-10">
+                    <h3 class="text-xs font-bold text-gray-400 mb-1 uppercase tracking-widest">Cảnh Báo Kho</h3>
+                    <p class="text-3xl xl:text-4xl font-black text-red-600 tracking-tight">{{ dashboardStats.activeAlerts }} <span class="text-sm font-semibold text-red-400">SKU</span></p>
+                </div>
+                <div class="relative z-10 mt-5 border-t border-gray-100 pt-4">
+                    <p class="text-xs font-semibold text-red-500 bg-red-50 py-1.5 px-3 rounded-lg w-fit inline-block">Hết hàng / Cạn định mức</p>
+                </div>
             </div>
         </div>
 
-        <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 md:p-6 mt-6">
-            <div class="flex items-center justify-between mb-6">
-                <h3 class="text-base font-bold text-gray-800 flex items-center gap-2"><PresentationChartBarIcon class="w-5 h-5 text-indigo-500"/> Biểu đồ Lượng Giao Dịch (6 tháng gần nhất)</h3>
-                <div class="flex gap-4 text-xs font-bold text-gray-500 uppercase tracking-wider">
-                    <span class="flex items-center gap-1"><div class="w-3 h-3 bg-gradient-to-t from-emerald-500 to-emerald-300 rounded-sm shadow-sm"></div> Nhập Kho</span>
-                    <span class="flex items-center gap-1"><div class="w-3 h-3 bg-gradient-to-t from-amber-500 to-amber-300 rounded-sm shadow-sm"></div> Xuất Kho</span>
+        <div class="bg-white rounded-3xl border border-gray-100 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.03)] p-6 md:p-8 mt-6">
+            <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-8 gap-4">
+                <h3 class="text-lg font-bold text-gray-800 flex items-center gap-2"><PresentationChartBarIcon class="w-6 h-6 text-blue-500"/> Lưu Lượng Giao Dịch (6 tháng qua)</h3>
+                <div class="flex gap-5 text-xs font-bold text-gray-500 uppercase tracking-widest bg-gray-50 px-4 py-2 rounded-xl border border-gray-100">
+                    <span class="flex items-center gap-2"><div class="w-3 h-3 bg-emerald-500 rounded-full shadow-sm"></div> Nhập Kho</span>
+                    <span class="flex items-center gap-2"><div class="w-3 h-3 bg-amber-500 rounded-full shadow-sm"></div> Xuất Kho</span>
                 </div>
             </div>
 
-            <div class="w-full h-56 sm:h-64 flex items-end justify-around border-b-2 border-gray-200 pb-2 relative mt-4">
-                <div class="absolute left-0 w-full h-full flex flex-col justify-between z-0 pointer-events-none opacity-30">
-                    <div class="w-full border-t border-dashed border-gray-400 flex items-start"><span class="text-[10px] text-gray-600 -mt-2 bg-white px-1 ml-2">{{ maxChartValue }} phiếu</span></div>
-                    <div class="w-full border-t border-dashed border-gray-400 flex items-start"><span class="text-[10px] text-gray-600 -mt-2 bg-white px-1 ml-2">{{ Math.round(maxChartValue/2) }} phiếu</span></div>
-                    <div class="w-full border-t border-dashed border-gray-400"></div>
+            <div class="w-full h-64 sm:h-72 flex items-end justify-around border-b-2 border-gray-100 pb-2 relative mt-4">
+                <div class="absolute left-0 w-full h-full flex flex-col justify-between z-0 pointer-events-none opacity-20">
+                    <div class="w-full border-t border-dashed border-gray-500 flex items-start"><span class="text-[10px] text-gray-600 font-bold -mt-2.5 bg-white px-2 ml-1 rounded-full">{{ maxChartValue }}</span></div>
+                    <div class="w-full border-t border-dashed border-gray-500 flex items-start"><span class="text-[10px] text-gray-600 font-bold -mt-2.5 bg-white px-2 ml-1 rounded-full">{{ Math.round(maxChartValue/2) }}</span></div>
+                    <div class="w-full border-t border-solid border-gray-300"></div>
                 </div>
 
-                <div v-for="(col, idx) in chartData" :key="idx" class="flex flex-col items-center gap-1 z-10 w-[14%] relative group">
-                    <div class="flex items-end justify-center gap-1 sm:gap-2 w-full h-48">
-                        <div class="w-1/3 sm:w-8 bg-gradient-to-t from-emerald-500 to-emerald-300 rounded-t-md shadow-sm transition-all duration-500 hover:brightness-110 relative" :style="`height: ${(col.in / maxChartValue) * 100}%`">
-                            <span class="absolute -top-6 left-1/2 -translate-x-1/2 bg-emerald-800 text-white text-[10px] font-bold px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity">{{ col.in }}</span>
-                        </div>
-                        <div class="w-1/3 sm:w-8 bg-gradient-to-t from-amber-500 to-amber-300 rounded-t-md shadow-sm transition-all duration-500 hover:brightness-110 relative" :style="`height: ${(col.out / maxChartValue) * 100}%`">
-                            <span class="absolute -top-6 left-1/2 -translate-x-1/2 bg-amber-800 text-white text-[10px] font-bold px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity">{{ col.out }}</span>
+                <div v-for="(col, idx) in chartData" :key="idx" class="flex flex-col items-center gap-2 z-10 w-[14%] relative group cursor-pointer">
+                    <div class="flex items-end justify-center gap-2 sm:gap-3 w-full h-56 relative">
+                        <div class="w-1/3 sm:w-10 bg-gradient-to-t from-emerald-600 to-emerald-400 rounded-t-xl shadow-md transition-all duration-300 group-hover:opacity-80" :style="`height: ${(col.in / maxChartValue) * 100}%`"></div>
+                        <div class="w-1/3 sm:w-10 bg-gradient-to-t from-amber-500 to-orange-400 rounded-t-xl shadow-md transition-all duration-300 group-hover:opacity-80" :style="`height: ${(col.out / maxChartValue) * 100}%`"></div>
+                        
+                        <div class="absolute -top-14 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-xs font-bold px-3 py-2 rounded-lg opacity-0 group-hover:opacity-100 transition-all duration-200 pointer-events-none shadow-xl whitespace-nowrap z-50 transform group-hover:-translate-y-2">
+                            <p class="text-center border-b border-gray-700 pb-1 mb-1">{{ col.label }}</p>
+                            <span class="text-emerald-400">Nhập: {{ col.in }}</span> | <span class="text-amber-400">Xuất: {{ col.out }}</span>
+                            <div class="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-gray-900 rotate-45"></div>
                         </div>
                     </div>
-                    <span class="text-[10px] sm:text-xs font-bold text-gray-600 mt-2">{{ col.label }}</span>
+                    <span class="text-xs font-bold text-gray-500 mt-2 bg-gray-50 px-3 py-1 rounded-lg">{{ col.label }}</span>
                 </div>
             </div>
         </div>
 
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
             
-            <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 md:p-6 flex flex-col items-center">
-                <h3 class="text-base font-bold text-gray-800 mb-6 flex items-center gap-2 w-full text-left"><ChartPieIcon class="w-5 h-5 text-indigo-500"/> Cơ cấu Nhóm hàng (Tồn)</h3>
+            <div class="bg-white rounded-3xl border border-gray-100 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.03)] p-6 flex flex-col items-center hover:shadow-lg transition-shadow duration-300">
+                <h3 class="text-sm font-bold text-gray-500 uppercase tracking-widest mb-6 w-full text-left">Tỷ trọng Danh mục</h3>
                 
                 <div v-if="categoryData.length === 0" class="flex-1 flex flex-col items-center justify-center text-gray-400 italic">Kho đang trống</div>
                 <template v-else>
-                    <div class="relative w-40 h-40 rounded-full flex items-center justify-center shadow-md transition-all duration-700" :style="{ background: pieGradient }">
-                        <div class="w-24 h-24 bg-white rounded-full absolute flex flex-col items-center justify-center shadow-inner">
-                            <span class="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Tổng</span>
-                            <span class="text-xl font-black text-gray-800">{{ dashboardStats.totalItems }}</span>
+                    <div class="relative w-48 h-48 rounded-full flex items-center justify-center shadow-lg transition-all duration-700 hover:scale-105" :style="{ background: pieGradient }">
+                        <div class="w-32 h-32 bg-white rounded-full absolute flex flex-col items-center justify-center shadow-[inset_0_4px_10px_rgba(0,0,0,0.1)] z-10">
+                            <span class="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Tổng SL</span>
+                            <span class="text-2xl font-black text-gray-800">{{ dashboardStats.totalItems }}</span>
                         </div>
                     </div>
-                    <div class="w-full mt-6 space-y-2">
-                        <div v-for="(cat, idx) in categoryData" :key="idx" class="flex items-center justify-between text-sm">
-                            <div class="flex items-center gap-2 font-semibold text-gray-600">
-                                <div class="w-3 h-3 rounded-full" :style="{ backgroundColor: cat.color }"></div> {{ cat.label }}
+                    <div class="w-full mt-8 space-y-3">
+                        <div v-for="(cat, idx) in categoryData" :key="idx" class="flex items-center justify-between text-sm bg-gray-50/50 px-3 py-2 rounded-lg border border-gray-100 hover:bg-gray-50 transition-colors">
+                            <div class="flex items-center gap-3 font-semibold text-gray-700">
+                                <div class="w-4 h-4 rounded-full shadow-sm" :style="{ backgroundColor: cat.color }"></div> {{ cat.label }}
                             </div>
-                            <span class="font-bold text-gray-800">{{ cat.percentage }}%</span>
+                            <span class="font-black text-gray-900 bg-white px-2 py-0.5 rounded shadow-sm border border-gray-100">{{ cat.percentage }}%</span>
                         </div>
                     </div>
                 </template>
             </div>
 
-            <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 md:p-6 flex flex-col justify-between">
-                <h3 class="text-base font-bold text-gray-800 flex items-center gap-2 w-full text-left"><MapPinIcon class="w-5 h-5 text-indigo-500"/> Tỉ lệ Lấp đầy Kho (Real Data)</h3>
-                <div class="flex flex-col items-center justify-center flex-1 py-4">
+            <div class="bg-white rounded-3xl border border-gray-100 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.03)] p-6 flex flex-col justify-between hover:shadow-lg transition-shadow duration-300">
+                <h3 class="text-sm font-bold text-gray-500 uppercase tracking-widest w-full text-left">Không gian Kho chứa</h3>
+                
+                <div class="flex flex-col items-center justify-center flex-1 py-6">
                     <template v-if="capacityData.max === 0">
-                        <div class="text-center text-gray-400 italic text-sm mt-4 flex flex-col items-center">
-                            <BuildingStorefrontIcon class="w-10 h-10 mb-2 text-gray-200"/>
-                            Kho chưa được thiết lập Vị trí Kệ (Locations).<br>Hệ thống không thể tính % lấp đầy.
+                        <div class="text-center text-gray-400 text-sm flex flex-col items-center bg-gray-50 p-6 rounded-2xl border border-dashed border-gray-200">
+                            <BuildingStorefrontIcon class="w-12 h-12 mb-3 text-gray-300"/>
+                            <span class="font-semibold text-gray-600 mb-1">Chưa cấu hình Vị trí Kệ</span>
+                            <span>Hệ thống không thể tính % lấp đầy không gian.</span>
                         </div>
                     </template>
                     <template v-else>
-                        <div class="relative w-full h-8 bg-gray-100 rounded-full overflow-hidden shadow-inner mb-4 border border-gray-200">
-                            <div class="h-full transition-all duration-1000 ease-out" :class="capacityData.colorClass" :style="`width: ${capacityData.percentage}%`"></div>
-                            <span class="absolute inset-0 flex items-center justify-center text-xs font-black text-gray-800 mix-blend-overlay">{{ capacityData.percentage }}% Lấp đầy</span>
+                        <CubeIcon class="w-16 h-16 mb-6" :class="capacityData.textClass" />
+                        
+                        <div class="relative w-full h-10 bg-gray-100 rounded-2xl overflow-hidden shadow-[inset_0_2px_4px_rgba(0,0,0,0.06)] mb-5 border border-gray-200">
+                            <div class="absolute h-full transition-all duration-1000 ease-out bg-gradient-to-r progress-stripes shadow-[inset_0_2px_4px_rgba(255,255,255,0.3)]" 
+                                 :class="capacityData.colorClass" 
+                                 :style="`width: ${capacityData.percentage}%`">
+                            </div>
+                            <span class="absolute inset-0 flex items-center justify-center text-sm font-black text-gray-800 drop-shadow-md mix-blend-overlay">{{ capacityData.percentage }}% Đã sử dụng</span>
                         </div>
-                        <p class="text-sm text-gray-500 font-medium text-center">Đang dùng <strong class="text-gray-800">{{ capacityData.current }}</strong> / tổng <strong class="text-gray-800">{{ capacityData.max }}</strong> vị trí kệ</p>
+                        
+                        <div class="flex items-center justify-between w-full px-4 py-3 bg-gray-50 rounded-xl border border-gray-100">
+                            <div class="text-center">
+                                <p class="text-[10px] uppercase font-bold text-gray-400 mb-1">Đang Dùng</p>
+                                <p class="text-xl font-black text-gray-800">{{ capacityData.current }}</p>
+                            </div>
+                            <div class="h-8 w-px bg-gray-300"></div>
+                            <div class="text-center">
+                                <p class="text-[10px] uppercase font-bold text-gray-400 mb-1">Tổng Vị Trí Kệ</p>
+                                <p class="text-xl font-black text-gray-800">{{ capacityData.max }}</p>
+                            </div>
+                        </div>
                     </template>
                 </div>
             </div>
 
-            <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 md:p-6 flex flex-col">
-                <h3 class="text-base font-bold text-gray-800 mb-4 flex items-center gap-2 w-full text-left"><StarIcon class="w-5 h-5 text-amber-500"/> Top Xuất Kho</h3>
+            <div class="bg-white rounded-3xl border border-gray-100 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.03)] p-6 flex flex-col hover:shadow-lg transition-shadow duration-300">
+                <h3 class="text-sm font-bold text-gray-500 uppercase tracking-widest mb-6 w-full text-left">Top Sản Phẩm Bán Chạy</h3>
                 
-                <div v-if="topOutboundProducts.length === 0" class="flex-1 flex flex-col items-center justify-center text-gray-400 italic text-sm">Chưa có dữ liệu Xuất kho</div>
-                <div v-else class="space-y-3 mt-2">
-                    <div v-for="(prod, idx) in topOutboundProducts" :key="idx" class="flex items-center gap-3 p-2 hover:bg-gray-50 rounded-lg transition-colors border border-transparent hover:border-gray-100">
-                        <div class="w-8 h-8 rounded bg-indigo-50 text-indigo-600 flex items-center justify-center font-black text-sm shrink-0 border border-indigo-100">#{{ idx + 1 }}</div>
-                        <div class="flex-1 min-w-0">
-                            <p class="text-sm font-bold text-gray-800 truncate">{{ prod.name }}</p>
-                            <p class="text-[10px] text-gray-500">{{ prod.sku }}</p>
+                <div v-if="topOutboundProducts.length === 0" class="flex-1 flex flex-col items-center justify-center text-gray-400 italic text-sm">
+                    <StarIcon class="w-12 h-12 mb-3 text-gray-200"/>
+                    Chưa có dữ liệu Xuất kho
+                </div>
+                <div v-else class="space-y-4">
+                    <div v-for="(prod, idx) in topOutboundProducts" :key="idx" class="flex items-center gap-4 p-3 bg-gray-50/50 hover:bg-white rounded-2xl transition-all border border-gray-100 hover:border-amber-200 hover:shadow-md group">
+                        
+                        <div class="w-10 h-10 rounded-xl flex items-center justify-center font-black text-base shrink-0 shadow-sm transition-colors"
+                             :class="idx === 0 ? 'bg-gradient-to-br from-amber-400 to-yellow-500 text-white' : (idx === 1 ? 'bg-gradient-to-br from-gray-300 to-gray-400 text-white' : (idx === 2 ? 'bg-gradient-to-br from-orange-300 to-orange-400 text-white' : 'bg-white border border-gray-200 text-gray-500'))">
+                            #{{ idx + 1 }}
                         </div>
+                        
+                        <div class="flex-1 min-w-0">
+                            <p class="text-sm font-bold text-gray-800 truncate group-hover:text-amber-600 transition-colors">{{ prod.name }}</p>
+                            <p class="text-[10px] font-semibold text-gray-400 mt-0.5 uppercase tracking-wider">{{ prod.sku }}</p>
+                        </div>
+                        
                         <div class="text-right">
-                            <p class="text-sm font-black text-amber-600">{{ prod.qty }}</p>
-                            <p class="text-[9px] font-bold text-gray-400 uppercase">Đơn vị</p>
+                            <p class="text-lg font-black text-gray-900 group-hover:text-amber-600 transition-colors">{{ prod.qty }}</p>
+                            <p class="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Đã Xuất</p>
                         </div>
                     </div>
                 </div>
@@ -407,6 +485,29 @@ onMounted(() => fetchData())
 </template>
 
 <style scoped>
-.animate-fade-in { animation: fadeIn 0.4s ease-out; }
-@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+.animate-fade-in { animation: fadeIn 0.5s cubic-bezier(0.4, 0, 0.2, 1); }
+@keyframes fadeIn { 
+    from { opacity: 0; transform: translateY(15px); } 
+    to { opacity: 1; transform: translateY(0); } 
+}
+
+/* CSS cho thanh sọc xéo chạy xịn sò */
+.progress-stripes {
+    background-image: linear-gradient(
+        45deg, 
+        rgba(255,255,255,0.2) 25%, 
+        transparent 25%, 
+        transparent 50%, 
+        rgba(255,255,255,0.2) 50%, 
+        rgba(255,255,255,0.2) 75%, 
+        transparent 75%, 
+        transparent
+    );
+    background-size: 1.5rem 1.5rem;
+    animation: progress-stripes 1.5s linear infinite;
+}
+@keyframes progress-stripes {
+    from { background-position: 1.5rem 0; }
+    to { background-position: 0 0; }
+}
 </style>

@@ -1,16 +1,17 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { 
-  MagnifyingGlassIcon, PlusIcon, PencilSquareIcon, TrashIcon, EyeIcon, 
+  MagnifyingGlassIcon, PlusIcon, PencilSquareIcon, TrashIcon, 
   XMarkIcon, CubeIcon, PhotoIcon, ScaleIcon, ArrowsRightLeftIcon, 
-  ArrowRightIcon, CurrencyDollarIcon 
+  CurrencyDollarIcon, InformationCircleIcon, ArrowTrendingUpIcon, 
+  ArrowTrendingDownIcon, ClockIcon 
 } from '@heroicons/vue/24/outline'
 import { useAuth } from '@/composables/useAuth' 
 
 const { currentUserRole } = useAuth()
 const currentRole = currentUserRole.value?.toLowerCase() || ''
 
-// 1. CHỈ THU MUA VÀ ADMIN MỚI ĐƯỢC QUẢN LÝ SẢN PHẨM & GIÁ NHẬP
+// QUYỀN HẠN
 const canEditProduct = computed(() => ['admin', 'giam_doc', 'nv_thu_mua'].includes(currentRole))
 const canViewPrice = computed(() => ['admin', 'giam_doc', 'nv_thu_mua'].includes(currentRole))
 
@@ -25,6 +26,12 @@ const brandList = ref([])
 const unitList = ref([])
 
 const formatCurrency = (val) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(val || 0)
+
+const formatDateTime = (val) => {
+    if (!val) return '';
+    const d = new Date(val);
+    return d.toLocaleDateString('vi-VN') + ' ' + d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+}
 
 const getAuthHeaders = () => ({
   'Content-Type': 'application/json',
@@ -76,135 +83,116 @@ const filteredProducts = computed(() => {
 const showModal = ref(false)
 const modalMode = ref('add') 
 
-// ĐÃ XÓA HOÀN TOÀN 'price' (Giá Bán) - CHỈ CÒN 'importPrice'
 const formData = ref({ 
   id: 0, name: '', category: '', brand: '', unit: '', 
   packSize: '', weight: 0, status: 'active', conversions: [],
   importPrice: 0 
 })
 
-// === QUY CÁCH ĐÓNG GÓI ===
-const packState = ref({
-  hasSmall: false, smallRate: 1,
-  hasBig: false, bigRate: 1,
-  hasPallet: false, palletRate: 1
-})
+const packTiers = ref([])
 
-const smallTotal = computed(() => packState.value.hasSmall ? packState.value.smallRate : 1)
-const bigTotal = computed(() => packState.value.hasBig ? (packState.value.bigRate * smallTotal.value) : smallTotal.value)
-const palletTotal = computed(() => packState.value.hasPallet ? (packState.value.palletRate * bigTotal.value) : bigTotal.value)
+// ---- STATE CHO MODAL LỊCH SỬ GIÁ ----
+const showHistoryModal = ref(false)
+const historyProduct = ref(null)
+const priceHistoryList = ref([]) 
+const isLoadingHistory = ref(false)
 
-const prevForBig = computed(() => packState.value.hasSmall ? 'Thùng nhỏ' : (formData.value.unit || 'Sản phẩm lẻ'))
-const prevForPallet = computed(() => packState.value.hasBig ? 'Thùng to' : (packState.value.hasSmall ? 'Thùng nhỏ' : (formData.value.unit || 'Sản phẩm lẻ')))
+const addTier = () => {
+  packTiers.value.unshift({ unitName: '', qtyPerPrev: 1 })
+}
 
-const smallBoxFormula = computed(() => { 
-  return `1 Thùng nhỏ = ${packState.value.smallRate} ${formData.value.unit || 'SL'}` 
-})
-const bigBoxFormula = computed(() => {
-  let str = `1 Thùng to = `
-  if (packState.value.hasSmall) { str += `${packState.value.bigRate} Thùng nhỏ = ` }
-  str += `${bigTotal.value} ${formData.value.unit || 'SL'}`
-  return str
-})
-const palletFormula = computed(() => {
-  let str = `1 Pallet = `
-  if (packState.value.hasBig) {
-    str += `${packState.value.palletRate} Thùng to = `
-    if (packState.value.hasSmall) { str += `${packState.value.palletRate * packState.value.bigRate} Thùng nhỏ = ` }
-  } else if (packState.value.hasSmall) {
-    str += `${packState.value.palletRate} Thùng nhỏ = `
+const removeTier = (index) => {
+  packTiers.value.splice(index, 1)
+}
+
+const getAvailableUnits = (currentIndex) => {
+  return unitList.value.filter(u => {
+    if (u === formData.value.unit) return false; 
+    for (let i = 0; i < packTiers.value.length; i++) {
+      if (i !== currentIndex && packTiers.value[i].unitName === u) return false; 
+    }
+    return true;
+  });
+}
+
+const continuousChainDisplay = computed(() => {
+  if (packTiers.value.length === 0 || !formData.value.unit) return ''
+  if (packTiers.value.some(t => !t.unitName)) return 'Vui lòng chọn đầy đủ tên Đơn vị...'
+
+  let chain = []
+  let currentMultiplier = 1
+  
+  chain.push(`1 ${packTiers.value[0].unitName}`)
+
+  for (let i = 0; i < packTiers.value.length; i++) {
+    currentMultiplier *= (packTiers.value[i].qtyPerPrev || 1)
+    const nextUnitName = (i === packTiers.value.length - 1) ? formData.value.unit : packTiers.value[i+1].unitName
+    chain.push(`${currentMultiplier} ${nextUnitName}`)
   }
-  str += `${palletTotal.value} ${formData.value.unit || 'SL'}`
-  return str
+  return chain.join(' = ')
 })
 
 const getConversionString = (product) => {
   if (!product.conversions || product.conversions.length === 0) {
-    if (product.packSize && !isNaN(product.packSize)) return `1 Thùng = ${product.packSize} ${product.unit || 'SL'}`;
-    return product.packSize || 'Chưa thiết lập quy cách Đa cấp'
+    return product.packSize || 'Hàng bán lẻ (Không quy đổi)'
   }
   
-  const small = product.conversions.find(c => c.altUnit === 'Thùng nhỏ')
-  const big = product.conversions.find(c => c.altUnit === 'Thùng to')
-  const pallet = product.conversions.find(c => c.altUnit === 'Pallet')
-  const unit = product.unit || 'SL'
-
-  let parts = []
-  if (pallet) {
-    parts.push(`1 Pallet`)
-    if (big && big.rate > 0) parts.push(`${pallet.rate / big.rate} Thùng to`)
-    if (small && small.rate > 0) parts.push(`${pallet.rate / small.rate} Thùng nhỏ`)
-    parts.push(`${pallet.rate} ${unit}`)
-    return parts.join(' = ')
+  let sorted = [...product.conversions].sort((a, b) => b.rate - a.rate)
+  let str = `1 ${sorted[0].altUnit}`
+  
+  for (let i = 0; i < sorted.length - 1; i++) {
+    let childQty = sorted[i].rate / sorted[i+1].rate
+    str += ` = ${childQty} ${sorted[i+1].altUnit}`
   }
-  if (big) {
-    parts.push(`1 Thùng to`)
-    if (small && small.rate > 0) parts.push(`${big.rate / small.rate} Thùng nhỏ`)
-    parts.push(`${big.rate} ${unit}`)
-    return parts.join(' = ')
-  }
-  if (small) return `1 Thùng nhỏ = ${small.rate} ${unit}`
-  return product.packSize || 'Chưa thiết lập quy cách'
+  
+  str += ` = ${sorted[sorted.length-1].rate} ${product.unit || 'SL'}`
+  return str
 }
 
-const getWeightDisplay = (product) => {
-  if (!product.weight || product.weight <= 0) return [{ name: `Trọng lượng`, weight: 0 }];
-  
-  let results = []; let basePackRate = 1; let basePackName = 'Thùng/Kiện'; let hasConversions = false;
-
-  if (product.conversions && product.conversions.length > 0) {
-    hasConversions = true;
-    const small = product.conversions.find(c => c.altUnit === 'Thùng nhỏ');
-    if (small) { basePackRate = small.rate; basePackName = 'Thùng nhỏ'; } 
-    else { basePackRate = product.conversions[0].rate; basePackName = product.conversions[0].altUnit; }
-  } else if (product.conversionRate > 1) {
-    hasConversions = true; basePackRate = product.conversionRate; basePackName = 'Thùng';
-  } 
-
-  if (!hasConversions) return [{ name: `1 ${product.unit || 'SL'}`, weight: product.weight, isMain: true }];
-
-  const unitWeight = product.weight / basePackRate;
-  results.push({ name: `1 ${basePackName}`, weight: product.weight, isMain: true });
+const getTierDetails = (product) => {
+  let results = [];
+  results.push({ 
+    name: `1 ${product.unit || 'SL'}`, 
+    weight: product.weight || 0, 
+    price: product.importPrice || 0,
+    isMain: true 
+  });
 
   if (product.conversions && product.conversions.length > 0) {
     product.conversions.forEach(c => {
-      if (c.altUnit !== basePackName) {
-        const w = unitWeight * c.rate;
-        results.push({ name: `1 ${c.altUnit}`, weight: parseFloat(w.toFixed(3)) });
-      }
+      let w = (product.weight || 0) * c.rate;
+      let p = (product.importPrice || 0) * c.rate;
+      results.push({ 
+        name: `1 ${c.altUnit}`, 
+        weight: parseFloat(w.toFixed(3)), 
+        price: p,
+        isMain: false
+      });
     });
   }
   return results.sort((a,b) => a.weight - b.weight);
 }
 
-const openModal = (mode, product = null) => {
+// ---- CÁC HÀM XỬ LÝ FORM CHÍNH ----
+const openModal = async (mode, product = null) => {
   modalMode.value = mode
-  
-  packState.value = { hasSmall: false, smallRate: 1, hasBig: false, bigRate: 1, hasPallet: false, palletRate: 1 }
+  packTiers.value = []
 
   if (product) {
     if (product.conversions && product.conversions.length > 0) {
       let convs = [...product.conversions].sort((a,b) => a.rate - b.rate)
-      
-      let small = convs.find(c => c.altUnit === 'Thùng nhỏ')
-      let big = convs.find(c => c.altUnit === 'Thùng to')
-      let pallet = convs.find(c => c.altUnit === 'Pallet')
-
-      if (!small && !big && !pallet) {
-        if(convs.length >= 1) small = convs[0]
-        if(convs.length >= 2) big = convs[1]
-        if(convs.length >= 3) pallet = convs[2]
+      let tempTiers = []
+      let prevRate = 1
+      for (let c of convs) {
+        tempTiers.push({
+          unitName: c.altUnit,
+          qtyPerPrev: c.rate / prevRate 
+        })
+        prevRate = c.rate
       }
-
-      if (small) { packState.value.hasSmall = true; packState.value.smallRate = small.rate; }
-      if (big) { packState.value.hasBig = true; packState.value.bigRate = big.rate / (small ? small.rate : 1); }
-      if (pallet) { packState.value.hasPallet = true; packState.value.palletRate = pallet.rate / (big ? big.rate : (small ? small.rate : 1)); }
+      packTiers.value = tempTiers.reverse()
     }
-    // Set importPrice, ignore Price
-    formData.value = { 
-      ...product, 
-      importPrice: product.importPrice || 0 
-    } 
+    formData.value = { ...product, importPrice: product.importPrice || 0 } 
   } else {
     formData.value = { id: 0, name: '', category: '', brand: '', unit: '', packSize: '', weight: 0, status: 'active', conversions: [], importPrice: 0 }
   }
@@ -215,25 +203,25 @@ const closeModal = () => showModal.value = false
 
 const handleSubmit = async () => {
   if (!formData.value.category || !formData.value.brand || !formData.value.unit) {
-    alert("Vui lòng chọn đầy đủ Danh mục, Thương hiệu, Đơn vị tính cơ bản!"); return;
+    alert("Vui lòng chọn đầy đủ Danh mục, Thương hiệu và ĐVT Cơ bản!"); return;
   }
 
   let payloadConversions = [];
+  let absoluteRate = 1;
 
-  if (packState.value.hasSmall && packState.value.smallRate > 0) payloadConversions.push({ altUnit: 'Thùng nhỏ', rate: smallTotal.value })
-  if (packState.value.hasBig && packState.value.bigRate > 0) payloadConversions.push({ altUnit: 'Thùng to', rate: bigTotal.value })
-  if (packState.value.hasPallet && packState.value.palletRate > 0) payloadConversions.push({ altUnit: 'Pallet', rate: palletTotal.value })
-
-  formData.value.packSize = payloadConversions.map(c => `1 ${c.altUnit}=${c.rate} ${formData.value.unit}`).join(' | ')
+  for (let i = packTiers.value.length - 1; i >= 0; i--) {
+    let tier = packTiers.value[i];
+    if (!tier.unitName.trim()) {
+      alert("Tên Đơn vị quy đổi không được để trống!"); return;
+    }
+    absoluteRate *= (tier.qtyPerPrev || 1);
+    payloadConversions.push({ altUnit: tier.unitName.trim(), rate: absoluteRate });
+  }
 
   try {
     const method = modalMode.value === 'add' ? 'POST' : 'PUT'
     const url = modalMode.value === 'add' ? API_URL : `${API_URL}/${formData.value.id}`
-    const payload = { 
-      ...formData.value, 
-      conversions: payloadConversions, 
-      id: formData.value.id || 0 
-    }
+    const payload = { ...formData.value, conversions: payloadConversions, id: formData.value.id || 0 }
 
     const res = await fetch(url, { 
       method: method, 
@@ -260,12 +248,35 @@ const handleDelete = async (id, name) => {
       if (res.ok) { 
         await fetchProducts() 
       } else { 
-        alert('Lỗi xóa sản phẩm') 
+        alert('Sản phẩm đã phát sinh giao dịch hoặc đang tồn kho, không thể xóa!') 
       }
-    } catch (error) { 
-      console.error('Lỗi xóa:', error) 
-    }
+    } catch (error) { console.error('Lỗi xóa:', error) }
   }
+}
+
+// ---- CÁC HÀM XỬ LÝ MODAL LỊCH SỬ ----
+const openHistoryModal = async (product) => {
+    historyProduct.value = product;
+    showHistoryModal.value = true;
+    isLoadingHistory.value = true;
+    try {
+        const res = await fetch(`${API_URL}/${product.id}/price-history`, { headers: getAuthHeaders() });
+        if (res.ok) {
+            priceHistoryList.value = await res.json();
+        } else {
+            priceHistoryList.value = [];
+        }
+    } catch (e) { 
+        console.error("Chưa có API Lịch sử giá hoặc lỗi kết nối."); 
+    } finally { 
+        isLoadingHistory.value = false; 
+    }
+}
+
+const closeHistoryModal = () => {
+    showHistoryModal.value = false;
+    historyProduct.value = null;
+    priceHistoryList.value = [];
 }
 
 onMounted(() => {
@@ -280,7 +291,7 @@ onMounted(() => {
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
       <div>
         <h2 class="text-xl md:text-2xl font-bold text-gray-800">Danh mục Sản phẩm (SKU)</h2>
-        <p class="text-xs md:text-sm text-gray-500 mt-1">Quản lý mã hàng, quy cách đóng gói và khối lượng</p>
+        <p class="text-xs md:text-sm text-gray-500 mt-1">Quản lý mã hàng, quy cách đóng gói đa cấp động</p>
         <p class="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded border border-indigo-200 uppercase mt-2 w-fit">Vai trò: {{ currentRole }}</p>
       </div>
       <div class="flex gap-2">
@@ -328,10 +339,10 @@ onMounted(() => {
               <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider w-16">Ảnh</th>
               <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Mã & Tên Sản phẩm</th>
               <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Phân loại</th>
-              <th v-if="canViewPrice" class="px-5 py-3.5 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">Giá Nhập</th>
               <th class="px-5 py-3.5 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Quy cách Đa cấp & Cân nặng</th>
+              <th v-if="canViewPrice" class="px-5 py-3.5 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">Giá Nhập (Quy đổi)</th>
               <th class="px-5 py-3.5 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Trạng thái</th>
-              <th v-if="canEditProduct" class="px-5 py-3.5 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">Thao tác</th>
+              <th v-if="canEditProduct || canViewPrice" class="px-5 py-3.5 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">Thao tác</th>
             </tr>
           </thead>
           
@@ -361,12 +372,6 @@ onMounted(() => {
                 </div>
               </td>
               
-              <td v-if="canViewPrice" class="px-5 py-3 text-right">
-                  <span class="text-sm font-bold text-blue-700 bg-blue-50 px-2 py-1 rounded border border-blue-100">
-                    {{ formatCurrency(product.importPrice) }}
-                  </span>
-              </td>
-
               <td class="px-5 py-3">
                 <div class="flex flex-col space-y-1">
                   <div class="flex items-center gap-1 text-xs text-gray-600">
@@ -380,24 +385,35 @@ onMounted(() => {
 
                   <div class="flex flex-wrap items-center gap-2 text-[11px] text-gray-600 mt-1.5 bg-gray-50 px-2 py-1.5 rounded border border-gray-100 w-fit">
                     <ScaleIcon class="w-4 h-4 text-gray-400"/>
-                    <template v-for="(wInfo, idx) in getWeightDisplay(product)" :key="idx">
+                    <template v-for="(tInfo, idx) in getTierDetails(product)" :key="idx">
                       <span :class="{'border-l border-gray-300 pl-2': idx > 0}">
-                        <strong :class="wInfo.isMain ? 'text-indigo-700' : 'text-gray-700'">{{ wInfo.name }}:</strong> {{ wInfo.weight }} kg
+                        <strong :class="tInfo.isMain ? 'text-indigo-700' : 'text-gray-700'">{{ tInfo.name }}:</strong> {{ tInfo.weight }} kg
                       </span>
                     </template>
                   </div>
-
                 </div>
               </td>
+
+              <td v-if="canViewPrice" class="px-5 py-3 text-right">
+                <div class="flex flex-col gap-1 items-end">
+                  <span v-for="(tInfo, idx) in getTierDetails(product)" :key="'p'+idx" 
+                        :class="tInfo.isMain ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-slate-50 text-slate-600 border-slate-200'"
+                        class="text-[11px] font-bold px-2 py-0.5 rounded border w-fit">
+                    <span class="text-[10px] text-slate-400 mr-1">{{ tInfo.name }}</span> {{ formatCurrency(tInfo.price) }}
+                  </span>
+                </div>
+              </td>
+
               <td class="px-5 py-3 text-center">
                 <span :class="product.status === 'active' ? 'bg-green-100 text-green-700 border-green-200' : 'bg-red-100 text-red-700 border-red-200'" class="text-[10px] font-bold px-2 py-1 rounded border uppercase">
                   {{ product.status === 'active' ? 'Đang KD' : 'Ngừng KD' }}
                 </span>
               </td>
               
-              <td v-if="canEditProduct" class="px-5 py-3 text-right space-x-2">
-                <button @click="openModal('edit', product)" class="p-1.5 text-amber-600 hover:bg-amber-50 rounded"><PencilSquareIcon class="w-5 h-5" /></button>
-                <button @click="handleDelete(product.id, product.name)" class="p-1.5 text-red-600 hover:bg-red-50 rounded"><TrashIcon class="w-5 h-5" /></button>
+              <td v-if="canEditProduct || canViewPrice" class="px-5 py-3 text-right space-x-1.5 whitespace-nowrap">
+                <button v-if="canViewPrice" @click="openHistoryModal(product)" class="p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Xem Lịch sử Biến động Giá"><ClockIcon class="w-5 h-5" /></button>
+                <button v-if="canEditProduct" @click="openModal('edit', product)" class="p-1.5 text-amber-600 hover:bg-amber-50 rounded transition-colors" title="Sửa thông tin"><PencilSquareIcon class="w-5 h-5" /></button>
+                <button v-if="canEditProduct" @click="handleDelete(product.id, product.name)" class="p-1.5 text-red-600 hover:bg-red-50 rounded transition-colors" title="Xóa sản phẩm"><TrashIcon class="w-5 h-5" /></button>
               </td>
             </tr>
           </tbody>
@@ -406,21 +422,19 @@ onMounted(() => {
     </div>
 
     <Teleport to="body">
-      <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center px-4 bg-slate-900/50 backdrop-blur-sm animate-fade-in">
+      <div v-if="showModal" class="fixed inset-0 z-[60] flex items-center justify-center px-4 bg-slate-900/50 backdrop-blur-sm animate-fade-in">
         <div class="bg-white rounded-xl shadow-2xl w-full max-w-5xl overflow-hidden transform transition-all flex flex-col max-h-[95vh]">
           
           <div class="px-6 py-4 border-b flex items-center justify-between bg-gray-50 shrink-0">
-            <h3 class="text-lg font-bold text-gray-800">{{ modalMode === 'add' ? 'Thêm Sản phẩm mới' : 'Cập nhật Sản phẩm' }}</h3>
+            <h3 class="text-lg font-bold text-gray-800">{{ modalMode === 'add' ? 'Thêm Sản phẩm mới' : `Cập nhật: ${formData.name}` }}</h3>
             <button @click="closeModal" class="text-gray-400 hover:text-red-500"><XMarkIcon class="w-6 h-6" /></button>
           </div>
 
           <div class="p-6 overflow-y-auto flex-1 custom-scrollbar bg-slate-50/50">
             <form @submit.prevent="handleSubmit" id="productForm" class="space-y-6">
-              
               <div class="grid grid-cols-1 md:grid-cols-12 gap-8">
                 
                 <div class="md:col-span-5 space-y-4 h-fit">
-                  
                   <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
                     <h4 class="text-sm font-bold text-primary-600 border-b pb-2 flex items-center gap-2">
                       <CubeIcon class="w-4 h-4"/> 1. Thông tin Cơ bản
@@ -429,7 +443,7 @@ onMounted(() => {
                     <div class="mt-4 space-y-4">
                       <div>
                         <label class="block text-xs font-bold mb-1">Tên Sản phẩm <span class="text-red-500">*</span></label>
-                        <input v-model="formData.name" type="text" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-1 focus:ring-primary-500" placeholder="VD: Nước tăng lực Redbull">
+                        <input v-model="formData.name" type="text" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-1 focus:ring-primary-500" placeholder="VD: Sữa chua Vinamilk">
                       </div>
 
                       <div class="grid grid-cols-2 gap-4">
@@ -448,6 +462,24 @@ onMounted(() => {
                           </select>
                         </div>
                       </div>
+
+                      <div class="grid grid-cols-2 gap-4 p-3 bg-indigo-50/50 border border-indigo-100 rounded-lg">
+                        <div>
+                          <label class="block text-[11px] font-bold mb-1 text-indigo-700">ĐVT CƠ BẢN <span class="text-red-500">*</span></label>
+                          <select v-model="formData.unit" required class="w-full border border-indigo-300 bg-white rounded px-2 py-1.5 text-sm font-bold text-indigo-700 cursor-pointer outline-none focus:ring-1 focus:ring-indigo-500 shadow-sm">
+                            <option value="" disabled selected>-- Chọn ĐVT --</option>
+                            <option v-for="u in unitList" :key="u" :value="u">{{ u }}</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label class="block text-[11px] font-bold mb-1 text-indigo-700">TRỌNG LƯỢNG / 1 ĐVT</label>
+                          <div class="relative">
+                            <input v-model.number="formData.weight" type="number" step="0.001" min="0" class="w-full border border-indigo-300 bg-white rounded pl-2 pr-7 py-1.5 text-sm focus:ring-1 focus:ring-indigo-500 outline-none font-bold shadow-inner" placeholder="VD: 0.2">
+                            <div class="absolute inset-y-0 right-0 pr-2 flex items-center pointer-events-none text-[10px] text-indigo-500 font-bold">kg</div>
+                          </div>
+                        </div>
+                      </div>
                       
                       <div>
                         <label class="block text-xs font-bold mb-1">Trạng thái kinh doanh</label>
@@ -463,7 +495,7 @@ onMounted(() => {
                     <h4 class="text-sm font-bold text-blue-700 border-b pb-2 flex items-center gap-2">
                       <CurrencyDollarIcon class="w-4 h-4"/> 2. Thiết lập Giá
                     </h4>
-                    <p class="text-[10px] text-gray-500 italic mt-1 mb-4">Giá này sẽ tự động được điền khi NV Thu mua lập Phiếu Nhập.</p>
+                    <p class="text-[10px] text-gray-500 italic mt-1 mb-4">Nhập giá mua vào của 1 {{ formData.unit || 'Đơn vị cơ bản' }}. Hệ thống sẽ tự nhân lên cho các cấp Lớn hơn.</p>
                     
                     <div>
                         <label class="block text-[11px] font-bold mb-1 text-blue-700 uppercase tracking-wide">Đơn giá Nhập (Dự tính)</label>
@@ -473,112 +505,147 @@ onMounted(() => {
                         </div>
                     </div>
                   </div>
-
                 </div>
 
-                <div class="md:col-span-7 space-y-5 bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
-                  <h4 class="text-sm font-bold text-indigo-600 border-b pb-2 flex items-center gap-2">
-                    <ScaleIcon class="w-4 h-4"/> {{ canViewPrice ? '3.' : '2.' }} Thiết lập Đóng gói & Quy đổi
+                <div class="md:col-span-7 bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex flex-col">
+                  <h4 class="text-sm font-bold text-indigo-600 border-b pb-2 flex items-center justify-between mb-4 shrink-0">
+                    <div class="flex items-center gap-2"><ScaleIcon class="w-4 h-4"/> {{ canViewPrice ? '3.' : '2.' }} Quy đổi Đóng gói Đa cấp</div>
+                    <button @click.prevent="addTier" class="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 px-3 py-1 rounded text-xs font-bold transition-colors shadow-sm">
+                      + Thêm Cấp Quy Đổi
+                    </button>
                   </h4>
                   
-                  <div class="grid grid-cols-2 gap-4">
-                    <div>
-                      <label class="block text-xs font-bold mb-1 text-gray-700">Đơn vị CƠ BẢN (Nhỏ nhất) <span class="text-red-500">*</span></label>
-                      <select v-model="formData.unit" required class="w-full border border-indigo-200 bg-indigo-50/50 rounded-lg px-3 py-2 text-sm cursor-pointer font-bold text-indigo-700 outline-none focus:ring-1 focus:ring-indigo-500">
-                        <option value="" disabled selected>VD: Cái, Lon, Gói...</option>
-                        <option v-for="u in unitList" :key="u" :value="u">{{ u }}</option>
-                      </select>
-                      <p class="text-[10px] text-red-500 mt-1 italic font-medium">* Hệ thống dùng ĐVT Cơ bản để chống lệch kho.</p>
+                  <div v-if="!formData.unit" class="py-8 text-center bg-yellow-50 rounded-lg border border-dashed border-yellow-300">
+                    <p class="text-sm font-medium text-yellow-700">Vui lòng chọn <b>ĐVT CƠ BẢN</b> ở Cột bên trái trước!</p>
+                  </div>
+
+                  <div v-else-if="packTiers.length > 0" class="flex-1 flex flex-col min-h-0">
+                    <h5 class="text-[11px] font-bold text-gray-500 uppercase mb-2 flex items-center gap-1 shrink-0">
+                      <ArrowsRightLeftIcon class="w-3.5 h-3.5"/> Cấu trúc Bắc Cầu
+                    </h5>
+
+                    <div class="space-y-2 overflow-y-auto max-h-[260px] custom-scrollbar pr-2 flex-1">
+                      <div v-for="(tier, index) in packTiers" :key="index" class="flex items-center gap-2 bg-gray-50 p-2.5 rounded-lg border border-gray-200 animate-fade-in shadow-sm">
+                        <span class="text-sm font-bold text-gray-400 bg-white px-2 py-1.5 border rounded shadow-sm cursor-not-allowed">1</span>
+                        <select v-model="tier.unitName" required class="w-full border border-indigo-300 rounded px-2 py-1.5 text-sm font-bold text-indigo-700 bg-white cursor-pointer focus:ring-1 focus:ring-indigo-500 outline-none shadow-sm">
+                          <option value="" disabled selected>-- Chọn ĐVT --</option>
+                          <option v-for="u in getAvailableUnits(index)" :key="u" :value="u">{{ u }}</option>
+                        </select>
+                        <span class="text-sm font-bold text-gray-500">=</span>
+                        <input v-model.number="tier.qtyPerPrev" type="number" min="1" placeholder="SL" class="w-16 md:w-20 border border-gray-300 rounded px-2 py-1.5 text-sm font-bold text-center focus:ring-1 focus:ring-indigo-500 outline-none shadow-inner">
+                        <span class="text-sm font-bold text-gray-600 bg-gray-200 px-2 md:px-3 py-1.5 rounded min-w-[70px] text-center border border-gray-300 shadow-inner truncate cursor-not-allowed">
+                          {{ index === packTiers.length - 1 ? (formData.unit || 'ĐVT Cơ Bản') : (packTiers[index+1].unitName || '...') }}
+                        </span>
+                        <button @click.prevent="removeTier(index)" class="text-red-400 hover:text-red-600 p-1.5 bg-white border rounded hover:bg-red-50 transition-colors shadow-sm shrink-0">
+                          <TrashIcon class="w-4 h-4 md:w-5 md:h-5"/>
+                        </button>
+                      </div>
                     </div>
 
-                    <div>
-                      <label class="block text-xs font-bold mb-1 text-indigo-700">Trọng lượng (kg) / <span class="uppercase border-b border-indigo-700">1 Thùng nhỏ</span></label>
-                      <div class="relative">
-                        <input v-model.number="formData.weight" type="number" step="0.001" min="0" class="w-full border border-indigo-300 bg-indigo-50/20 rounded-lg pl-3 pr-8 py-2 text-sm focus:ring-1 focus:ring-indigo-500 outline-none font-bold" placeholder="VD: 5.5">
-                        <div class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-xs text-indigo-500 font-bold">kg</div>
+                    <div v-if="continuousChainDisplay" class="mt-4 p-3 bg-orange-50 border border-orange-200 rounded-lg flex items-start gap-2 shadow-sm shrink-0">
+                      <InformationCircleIcon class="w-5 h-5 text-orange-500 mt-0.5 shrink-0" />
+                      <div>
+                        <span class="text-[11px] font-bold text-orange-800 uppercase block mb-1">Mô phỏng Tổng cấu trúc Tồn kho:</span>
+                        <span class="text-[15px] font-black text-orange-600">{{ continuousChainDisplay }}</span>
                       </div>
-                      <p class="text-[10px] text-gray-500 mt-1 italic font-medium">Hệ thống sẽ tự động nhân lên cho Thùng to / Pallet.</p>
                     </div>
                   </div>
                   
-                  <div class="border-t border-gray-200 pt-3">
-                    <h5 class="text-[11px] font-bold text-gray-500 uppercase mb-3 flex items-center gap-1">
-                      <ArrowsRightLeftIcon class="w-3.5 h-3.5"/> Bảng Quy đổi Đa cấp
-                    </h5>
-
-                    <div class="space-y-3">
-                      
-                      <div class="border rounded-lg p-3 transition-all" :class="packState.hasSmall ? 'border-green-400 bg-green-50/50 shadow-sm' : 'border-gray-200 bg-gray-50/50'">
-                        <label class="flex items-center gap-2 cursor-pointer select-none">
-                          <input type="checkbox" v-model="packState.hasSmall" class="w-4 h-4 text-green-600 rounded focus:ring-green-500 cursor-pointer">
-                          <span class="text-sm font-bold text-gray-800">Thêm Thùng nhỏ (Lốc/Hộp/Vỉ)</span>
-                        </label>
-                        <div v-if="packState.hasSmall" class="mt-3 flex flex-col gap-2 pl-6 animate-fade-in">
-                          <div class="flex items-center gap-2 flex-wrap">
-                            <span class="text-sm font-bold text-gray-500">1 Thùng nhỏ chứa</span>
-                            <input v-model.number="packState.smallRate" type="number" min="1" placeholder="SL" class="w-20 border border-white rounded px-3 py-2 text-sm text-center font-bold shadow-sm outline-none focus:ring-1 focus:ring-green-500">
-                            <span class="text-sm font-semibold text-gray-700">{{ formData.unit || 'SL' }}</span>
-                          </div>
-                          
-                          <div class="text-[12px] font-bold text-orange-600 bg-orange-50 px-3 py-1.5 rounded border border-orange-200 w-fit flex items-center gap-1.5">
-                            Quy đổi: <ArrowRightIcon class="w-3.5 h-3.5 text-orange-500" />
-                            {{ smallBoxFormula }}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div class="border rounded-lg p-3 transition-all" :class="packState.hasBig ? 'border-blue-400 bg-blue-50/50 shadow-sm' : 'border-gray-200 bg-gray-50/50'">
-                        <label class="flex items-center gap-2 cursor-pointer select-none">
-                          <input type="checkbox" v-model="packState.hasBig" class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 cursor-pointer">
-                          <span class="text-sm font-bold text-gray-800">Thêm Thùng to (Kiện)</span>
-                        </label>
-                        <div v-if="packState.hasBig" class="mt-3 flex flex-col gap-2 pl-6 animate-fade-in">
-                          <div class="flex items-center gap-2 flex-wrap">
-                            <span class="text-sm font-bold text-gray-500">1 Thùng to chứa</span>
-                            <input v-model.number="packState.bigRate" type="number" min="1" placeholder="SL" class="w-20 border border-white rounded px-3 py-2 text-sm text-center font-bold shadow-sm outline-none focus:ring-1 focus:ring-blue-500">
-                            <span class="text-sm font-semibold text-blue-700">{{ prevForBig }}</span>
-                          </div>
-                          
-                          <div class="text-[12px] font-bold text-orange-600 bg-orange-50 px-3 py-1.5 rounded border border-orange-200 w-fit flex items-center gap-1.5">
-                            Quy đổi: <ArrowRightIcon class="w-3.5 h-3.5 text-orange-500" /> 
-                            {{ bigBoxFormula }}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div class="border rounded-lg p-3 transition-all" :class="packState.hasPallet ? 'border-indigo-400 bg-indigo-50/50 shadow-sm' : 'border-gray-200 bg-gray-50/50'">
-                        <label class="flex items-center gap-2 cursor-pointer select-none">
-                          <input type="checkbox" v-model="packState.hasPallet" class="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500 cursor-pointer">
-                          <span class="text-sm font-bold text-gray-800">Cấu hình tải Pallet</span>
-                        </label>
-                        <div v-if="packState.hasPallet" class="mt-3 flex flex-col gap-2 pl-6 animate-fade-in">
-                          <div class="flex items-center gap-2 flex-wrap">
-                            <span class="text-sm font-bold text-gray-500">1 Pallet chứa</span>
-                            <input v-model.number="packState.palletRate" type="number" min="1" placeholder="SL" class="w-20 border border-white rounded px-3 py-2 text-sm text-center font-bold shadow-sm outline-none focus:ring-1 focus:ring-indigo-500">
-                            <span class="text-sm font-semibold text-indigo-700">{{ prevForPallet }}</span>
-                          </div>
-                          
-                          <div class="text-[12px] font-bold text-orange-600 bg-orange-50 px-3 py-1.5 rounded border border-orange-200 w-fit flex items-center gap-1.5">
-                            Quy đổi: <ArrowRightIcon class="w-3.5 h-3.5 text-orange-500" />
-                            {{ palletFormula }}
-                          </div>
-                        </div>
-                      </div>
-
-                    </div>
+                  <div v-else class="py-12 text-center bg-gray-50/50 rounded-lg border border-dashed border-gray-300 flex-1 flex flex-col justify-center">
+                    <CubeIcon class="w-10 h-10 text-gray-300 mx-auto mb-2" />
+                    <p class="text-sm text-gray-500 font-medium">Sản phẩm bán lẻ (Không có quy đổi).</p>
+                    <p class="text-xs text-gray-400 mt-1">Bấm nút "+ Thêm Cấp Quy Đổi" ở trên để thiết lập Thùng, Lốc...</p>
                   </div>
 
                 </div>
               </div>
-
             </form>
           </div>
 
           <div class="px-6 py-4 border-t flex justify-end gap-3 shrink-0 bg-white shadow-inner">
-            <button type="button" @click="closeModal" class="px-4 py-2 border border-gray-300 rounded-lg text-sm font-semibold hover:bg-gray-50">Hủy bỏ</button>
-            <button type="submit" form="productForm" class="px-4 py-2 bg-primary-600 text-white rounded-lg text-sm font-semibold hover:bg-primary-700 shadow-sm flex items-center gap-2">
+            <button type="button" @click="closeModal" class="px-4 py-2 border border-gray-300 rounded-lg text-sm font-semibold hover:bg-gray-50 transition-colors shadow-sm">Hủy bỏ</button>
+            <button type="submit" form="productForm" class="px-4 py-2 bg-primary-600 text-white rounded-lg text-sm font-semibold hover:bg-primary-700 transition-colors shadow-sm flex items-center gap-2">
               Lưu Sản phẩm
             </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div v-if="showHistoryModal" class="fixed inset-0 z-[70] flex items-center justify-center px-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden transform transition-all flex flex-col max-h-[85vh]">
+          
+          <div class="px-6 py-5 border-b border-gray-100 flex items-center justify-between bg-white shrink-0 shadow-sm z-10">
+            <div>
+              <h3 class="text-xl font-black text-gray-800 flex items-center gap-2">
+                <ClockIcon class="w-6 h-6 text-blue-600"/> Lịch sử Biến động Giá
+              </h3>
+              <p class="text-sm text-gray-500 font-medium mt-1">
+                Sản phẩm: <span class="text-blue-700 font-bold">[{{ historyProduct?.sku }}] {{ historyProduct?.name }}</span>
+              </p>
+            </div>
+            <button @click="closeHistoryModal" class="text-gray-400 hover:text-red-500 bg-gray-50 hover:bg-red-50 p-2 rounded-full transition-colors"><XMarkIcon class="w-6 h-6" /></button>
+          </div>
+
+          <div class="p-6 overflow-y-auto flex-1 custom-scrollbar bg-slate-50/50">
+            
+            <div class="mb-6 flex justify-end">
+              <div class="bg-blue-50 border border-blue-200 px-4 py-2 rounded-lg text-right shadow-sm">
+                <p class="text-[10px] text-blue-500 uppercase font-bold tracking-wider">Giá nhập đang áp dụng</p>
+                <p class="text-2xl font-black text-blue-700">{{ formatCurrency(historyProduct?.importPrice) }}</p>
+              </div>
+            </div>
+
+            <div v-if="isLoadingHistory" class="text-center py-16 text-gray-400 font-medium">Đang tải dữ liệu lịch sử...</div>
+            <div v-else-if="priceHistoryList.length === 0" class="text-center py-16 bg-white rounded-xl border border-dashed border-gray-300">
+                <ClockIcon class="w-16 h-16 text-gray-200 mx-auto mb-4" />
+                <p class="text-base font-bold text-gray-500">Chưa có dữ liệu biến động giá</p>
+                <p class="text-sm text-gray-400 mt-1">Hệ thống sẽ tự động ghi nhận khi bạn cập nhật giá mới.</p>
+            </div>
+
+            <div v-else class="space-y-6 relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-gray-200 before:via-gray-300 before:to-gray-100">
+                <div v-for="(hist, idx) in priceHistoryList" :key="hist.historyId || idx" class="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group is-active">
+                    
+                    <div class="flex items-center justify-center w-10 h-10 rounded-full border-4 border-white shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2 shadow-md z-10 transition-transform hover:scale-110"
+                         :class="hist.newPrice > hist.oldPrice ? 'bg-red-100 text-red-600' : (hist.newPrice < hist.oldPrice ? 'bg-emerald-100 text-emerald-600' : 'bg-gray-100 text-gray-500')">
+                        <ArrowTrendingUpIcon v-if="hist.newPrice > hist.oldPrice" class="w-5 h-5 stroke-[2.5]"/>
+                        <ArrowTrendingDownIcon v-else-if="hist.newPrice < hist.oldPrice" class="w-5 h-5 stroke-[2.5]"/>
+                        <span v-else class="w-3 h-3 rounded-full bg-gray-400"></span>
+                    </div>
+                    
+                    <div class="w-[calc(100%-4rem)] md:w-[calc(50%-3rem)] bg-white p-5 rounded-2xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-xs font-bold text-gray-400 bg-gray-50 px-2 py-1 rounded border">{{ formatDateTime(hist.effectiveDate) }}</span>
+                            <span class="text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider"
+                                  :class="hist.newPrice > hist.oldPrice ? 'bg-red-50 text-red-600 border border-red-100' : (hist.newPrice < hist.oldPrice ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' : 'bg-gray-100 text-gray-600 border border-gray-200')">
+                                {{ hist.newPrice > hist.oldPrice ? 'TĂNG' : (hist.newPrice < hist.oldPrice ? 'GIẢM' : 'THIẾT LẬP') }}
+                            </span>
+                        </div>
+                        
+                        <div class="flex items-center gap-3 mb-3 bg-slate-50 p-3 rounded-xl border border-slate-100">
+                            <div>
+                              <p class="text-[10px] text-gray-500 uppercase font-bold mb-0.5">Giá cũ</p>
+                              <span class="text-sm font-bold text-gray-400 line-through">{{ formatCurrency(hist.oldPrice) }}</span>
+                            </div>
+                            <ArrowsRightLeftIcon class="w-4 h-4 text-gray-300" />
+                            <div>
+                              <p class="text-[10px] text-blue-500 uppercase font-bold mb-0.5">Giá mới</p>
+                              <span class="text-xl font-black" :class="hist.newPrice > hist.oldPrice ? 'text-red-600' : (hist.newPrice < hist.oldPrice ? 'text-emerald-600' : 'text-gray-800')">
+                                {{ formatCurrency(hist.newPrice) }}
+                              </span>
+                            </div>
+                        </div>
+
+                        <div class="text-xs text-gray-600 flex flex-col gap-1.5">
+                            <p class="flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-gray-300"></span> Nguồn: <strong class="text-gray-800">{{ hist.source || 'Hệ thống' }}</strong></p>
+                            <p class="flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-gray-300"></span> Cập nhật bởi: <strong class="text-gray-800">{{ hist.updatedBy || 'Auto' }}</strong></p>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
           </div>
         </div>
       </div>
